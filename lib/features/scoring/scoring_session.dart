@@ -210,14 +210,14 @@ class ScoringSession {
     // --- Primary score ---
     final primaryScore = _computePrimaryScore(singerMidi, refMidi, pitchHz);
 
-    // --- Frame score = primary * confidence ---
-    // Confidence directly scales the output: clear singing (conf 0.9)
-    // gets full credit; borderline detection (conf 0.35) gets 35%.
-    var frameScore = primaryScore * confidence;
+    // --- Frame score = primary score directly ---
+    // Confidence is used only as a gate (< 0.3 rejected above).
+    // Once past the gate, the primary score stands on its own.
+    var frameScore = primaryScore;
 
     // --- Streak combo ---
     if (_mode == ScoringMode.streak) {
-      if (primaryScore >= 0.5 && confidence >= 0.5) {
+      if (primaryScore >= 0.5) {
         _streakCount++;
         final bonus = math.min(_streakCount, 30) / 75.0;
         frameScore = (frameScore + bonus).clamp(0.0, 1.0);
@@ -255,21 +255,23 @@ class ScoringSession {
           'singer=${pitchHz.toStringAsFixed(0)}Hz');
     }
 
-    _emitUpdate(pitchHz, primaryScore, noteName, stability, frameScore, rms, rms);
+    _emitUpdate(pitchHz, primaryScore, noteName, stability, confidence,
+        frameScore, rms);
   }
 
   void _emitUpdate(double pitchHz, double primary, String noteName,
-      double stability, double frameScore, double rms, double rmsForUi) {
+      double stability, double confidence, double frameScore, double rms) {
     _scoreController.add(ScoringUpdate(
       singerPitchHz: pitchHz,
       referencePitchHz: _currentReferencePitchHz,
       noteName: noteName,
       primaryScore: primary,
       stabilityScore: stability,
+      confidence: confidence,
       frameScore: frameScore,
       totalScore: currentScore,
       overallScore: finalScore,
-      rmsEnergy: rmsForUi,
+      rmsEnergy: rms,
       streakCount: _streakCount,
     ));
   }
@@ -336,98 +338,92 @@ class ScoringSession {
   // These modes score DIFFERENTLY from each other. The key insight:
   // without reference, we score HOW you sing, not WHAT you sing.
 
-  /// Pitch mode: rewards pitch STABILITY — holding clean, steady notes.
-  /// Wobbling, drifting, or unstable pitch = low. Steady = high.
-  /// This is different from the old chromatic snap which was always high.
+  /// Pitch mode: how cleanly are you holding notes?
+  /// Frame-to-frame stddev of MIDI values over the recent window.
+  /// At ~25fps, a steady note has stddev ~0.05-0.2 semitones.
+  /// Moving between notes has stddev ~0.5-2.0.
   double _voicePitchStability(double singerMidi) {
-    if (_recentPitches.length < 3) return 0.3;
-    // How stable is the pitch over the last few frames?
+    if (_recentPitches.length < 3) return 0.5;
     final mean = _recentPitches.reduce((a, b) => a + b) / _recentPitches.length;
     final variance = _recentPitches
         .map((p) => (p - mean) * (p - mean))
         .reduce((a, b) => a + b) / _recentPitches.length;
     final stddev = math.sqrt(variance);
 
-    // Holding a note (stddev < 0.3): score 0.85-1.0
-    // Slight wobble (0.3-1.0): score 0.5-0.85
-    // Big wobble (1.0-2.0): score 0.2-0.5
-    // Very unstable (2.0+): score 0.0-0.2
-    if (stddev < 0.3) return 0.85 + (0.3 - stddev) * 0.5;
-    if (stddev < 1.0) return 0.85 - (stddev - 0.3) * 0.5;
-    if (stddev < 2.0) return 0.5 - (stddev - 1.0) * 0.3;
-    return (0.2 - (stddev - 2.0) * 0.1).clamp(0.0, 0.2);
+    // Map stddev to score using a smooth curve.
+    // stddev 0.0 = 1.0 (perfect hold)
+    // stddev 0.5 = 0.78
+    // stddev 1.0 = 0.37
+    // stddev 2.0 = 0.02
+    return math.exp(-stddev * stddev / 0.8).clamp(0.0, 1.0);
   }
 
-  /// Contour mode: rewards melodic MOVEMENT with shape.
-  /// Smooth ups and downs = high. Flat monotone OR jerky noise = low.
+  /// Contour mode: are you creating melodic shapes?
+  /// Measures the TOTAL pitch range covered in the recent window,
+  /// not frame-to-frame deltas (which are tiny at 25fps).
   double _voiceContourMelody(double singerMidi) {
-    if (_prevSingerMidi > 0) {
-      _singerContour.add(singerMidi - _prevSingerMidi);
-      if (_singerContour.length > _contourWindowSize) _singerContour.removeAt(0);
-    }
-    if (_singerContour.length < 5) return 0.3;
+    _recentPitches; // already updated by the main flow
+    if (_recentPitches.length < 5) return 0.5;
 
-    int dirChanges = 0;
-    double totalMovement = 0;
-    double smoothness = 0;
-    for (var i = 1; i < _singerContour.length; i++) {
-      if (_singerContour[i] * _singerContour[i - 1] < 0) dirChanges++;
-      totalMovement += _singerContour[i].abs();
-      // Smoothness: how similar are consecutive movements?
-      smoothness += (_singerContour[i] - _singerContour[i - 1]).abs();
-    }
-    final n = _singerContour.length - 1;
+    // Pitch range in the window: how many semitones are you covering?
+    final maxP = _recentPitches.reduce(math.max);
+    final minP = _recentPitches.reduce(math.min);
+    final range = maxP - minP;
 
-    // No movement = monotone = bad
-    if (totalMovement < 0.5) return 0.1;
-
-    final changeRate = dirChanges / n;
-    final avgMovement = totalMovement / n;
-    final avgJerkiness = smoothness / n;
-
-    // Smooth melody: moderate movement (1-3 semitones/frame avg),
-    // moderate direction changes (0.1-0.4), low jerkiness
-    double score = 0.5;
-
-    // Movement reward (0 to +0.3)
-    if (avgMovement >= 0.3 && avgMovement <= 4.0) {
-      score += 0.3;
-    } else if (avgMovement < 0.3) {
-      score -= 0.2; // too flat
+    // Also count significant direction changes (> 0.5 semitone moves)
+    int significantMoves = 0;
+    for (var i = 1; i < _recentPitches.length; i++) {
+      if ((_recentPitches[i] - _recentPitches[i - 1]).abs() > 0.5) {
+        significantMoves++;
+      }
     }
 
-    // Direction change reward (0 to +0.3)
-    if (changeRate >= 0.1 && changeRate <= 0.4) {
-      score += 0.3;
-    } else if (changeRate < 0.1) {
-      score -= 0.2; // monotone
+    // Monotone (range < 1 semitone): low
+    // Moderate melody (range 2-6 semitones): high
+    // Wild range (> 10 semitones in 15 frames): probably noise
+    double rangeScore;
+    if (range < 0.5) {
+      rangeScore = 0.1; // flat
+    } else if (range < 1.5) {
+      rangeScore = 0.3 + (range - 0.5) * 0.4; // 0.3-0.7
+    } else if (range <= 7.0) {
+      rangeScore = 0.7 + (range - 1.5) * 0.055; // 0.7-1.0
     } else {
-      score -= 0.1; // too jerky
+      rangeScore = math.max(0.3, 1.0 - (range - 7.0) * 0.1); // drops for wild range
     }
 
-    // Smoothness penalty (jerkiness reduces score)
-    if (avgJerkiness > 3.0) score -= 0.2;
+    // Bonus for significant moves (actual melody, not drift)
+    final moveRatio = significantMoves / (_recentPitches.length - 1);
+    if (moveRatio > 0.1 && moveRatio < 0.5) {
+      rangeScore = (rangeScore + 0.15).clamp(0.0, 1.0);
+    }
 
-    return score.clamp(0.0, 1.0);
+    return rangeScore;
   }
 
-  /// Interval mode: rewards MUSICAL intervals between notes.
-  /// Steps, thirds, fifths = high. Same note or wild jumps = low.
-  /// Uses a smooth curve instead of hard thresholds.
+  /// Interval mode: are the jumps between notes musical?
+  /// Measures the actual note-to-note interval (not frame-to-frame micro-changes).
+  /// Only triggers on significant pitch changes (> 0.5 semitone).
   double _voiceIntervalQuality(double singerMidi) {
-    if (_prevSingerPitch <= 0) return 0.3;
-    final interval = (singerMidi - hzToMidi(_prevSingerPitch)).abs();
+    if (_prevSingerPitch <= 0) return 0.5;
+    final prevMidi = hzToMidi(_prevSingerPitch);
+    final interval = (singerMidi - prevMidi).abs();
 
-    // Smooth scoring curve peaking at 2 semitones (whole step)
-    // and dropping off for larger intervals.
-    // 0 = same note (0.1), 1 = half step (0.7), 2 = whole step (1.0),
-    // 3-4 = third (0.85), 5 = fourth (0.65), 7 = fifth (0.45),
-    // 12 = octave (0.15), >12 = wild (0.05)
-    if (interval < 0.3) return 0.1; // no movement
-    // Bell curve centered at 2.0 semitones
-    final x = (interval - 2.0).abs();
-    final score = math.exp(-x * x / 8.0); // Gaussian, sigma=2
-    return score.clamp(0.05, 1.0);
+    // Ignore micro-movements (< 0.5 semitone) — not real interval changes
+    if (interval < 0.5) {
+      // Holding a note or tiny drift: moderate score
+      return 0.6;
+    }
+
+    // Score musical intervals with a Gaussian centered at 2 semitones.
+    // 1 semitone (half step) = 0.88
+    // 2 semitones (whole step) = 1.0
+    // 3-4 (third) = 0.80-0.88
+    // 5 (fourth) = 0.57
+    // 7 (fifth) = 0.24
+    // 12 (octave) = very low
+    final x = interval - 2.0;
+    return math.exp(-x * x / 6.0).clamp(0.05, 1.0);
   }
 
   void _pushScore(double score) {
@@ -463,6 +459,7 @@ class ScoringUpdate {
   final String noteName;
   final double primaryScore;
   final double stabilityScore;
+  final double confidence;
   final double frameScore;
   final int totalScore;
   final int overallScore;
@@ -475,6 +472,7 @@ class ScoringUpdate {
     required this.noteName,
     required this.primaryScore,
     required this.stabilityScore,
+    required this.confidence,
     required this.frameScore,
     required this.totalScore,
     required this.overallScore,

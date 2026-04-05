@@ -220,6 +220,12 @@ class WebviewOverlay {
       scoreLabel.style.cssText = 'font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:3px;margin-bottom:4px;';
       scoreLabel.textContent = 'SCORE';
       scoreBox.appendChild(scoreLabel);
+      var modeLabel = document.createElement('div');
+      modeLabel.setAttribute('data-mode-label', '1');
+      modeLabel.style.cssText = 'font-size:9px;color:rgba(108,92,231,0.8);'
+        + 'letter-spacing:1px;margin-bottom:4px;font-weight:600;';
+      modeLabel.textContent = '$activeScoringMode';
+      scoreBox.appendChild(modeLabel);
       var scoreValue = document.createElement('div');
       scoreValue.id = 'fk-score-value';
       scoreValue.style.cssText = 'font-size:52px;font-weight:800;line-height:1;'
@@ -483,6 +489,17 @@ class WebviewOverlay {
       panel.appendChild(calBtn);
 
       overlay.appendChild(panel);
+
+      // Debug info box (top center)
+      var dbg = document.createElement('div');
+      dbg.id = 'fk-debug';
+      dbg.style.cssText = 'position:fixed;top:4px;left:50%;transform:translateX(-50%);'
+        + 'z-index:99999;background:rgba(0,0,0,0.8);color:#0f0;'
+        + 'font-family:monospace;font-size:10px;padding:4px 10px;'
+        + 'border-radius:8px;pointer-events:none;white-space:pre;';
+      dbg.textContent = 'waiting...';
+      overlay.appendChild(dbg);
+
       document.body.appendChild(overlay);
 
       window._fkTrail = [];
@@ -556,7 +573,7 @@ class WebviewOverlay {
   }
 
   static String updateScoreJs(int liveScore, int overallScore,
-      {int streakCount = 0}) {
+      {int streakCount = 0, String modeName = ''}) {
     String color, glow, feedback;
     if (streakCount > 20) {
       color = '#ffd700'; glow = '0 0 30px rgba(255,215,0,0.7)';
@@ -591,6 +608,8 @@ class WebviewOverlay {
         if (fb) { fb.textContent = '$feedback'; fb.style.color = '$color'; }
         var ov = document.getElementById('fk-overall-value');
         if (ov) { ov.textContent = '$overallScore'; ov.style.color = '$oColor'; }
+        var ml = document.querySelector('#fk-score [data-mode-label]');
+        if (ml && '$modeName') ml.textContent = '$modeName';
       })();
     ''';
   }
@@ -711,6 +730,30 @@ class WebviewOverlay {
         document.body.appendChild(c);
         setTimeout(function(){if(c.parentNode)c.style.animation='fkFadeIn 0.5s ease-out reverse';
           setTimeout(function(){if(c.parentNode)c.remove();},500);},6000);
+      })();
+    ''';
+  }
+
+  /// Debug info overlay showing raw scoring values.
+  static String updateDebugJs({
+    required double primaryScore,
+    required double confidence,
+    required double stability,
+    required double frameScore,
+    required double rms,
+    required double pitchHz,
+    required int streak,
+  }) {
+    final p = primaryScore.toStringAsFixed(2);
+    final c = confidence.toStringAsFixed(2);
+    final s = stability.toStringAsFixed(2);
+    final f = frameScore.toStringAsFixed(2);
+    final r = rms.toStringAsFixed(3);
+    final hz = pitchHz.toStringAsFixed(0);
+    return '''
+      (function() {
+        var d = document.getElementById('fk-debug');
+        if (d) d.textContent = 'P:$p C:$c S:$s F:$f RMS:$r ${hz}Hz stk:$streak';
       })();
     ''';
   }

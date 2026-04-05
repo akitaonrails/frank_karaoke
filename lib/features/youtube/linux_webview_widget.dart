@@ -441,6 +441,7 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
           update.totalScore,
           update.overallScore,
           streakCount: update.streakCount,
+          modeName: _scoringSession?.mode.label ?? '',
         ),
       );
       ref.read(currentScoreProvider.notifier).state = update.totalScore;
@@ -459,6 +460,19 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
     final normalizedRms = (update.rmsEnergy * 100).clamp(0.0, 1.0);
     _controller.evaluateJavascript(
       source: WebviewOverlay.updateNoteAndRmsJs(update.noteName, normalizedRms),
+    );
+
+    // Debug overlay
+    _controller.evaluateJavascript(
+      source: WebviewOverlay.updateDebugJs(
+        primaryScore: update.primaryScore,
+        confidence: update.confidence,
+        stability: update.stabilityScore,
+        frameScore: update.frameScore,
+        rms: update.rmsEnergy,
+        pitchHz: update.singerPitchHz,
+        streak: update.streakCount,
+      ),
     );
   }
 
