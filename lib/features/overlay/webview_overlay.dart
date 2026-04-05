@@ -1,9 +1,7 @@
 /// JavaScript overlay injected into the YouTube webview.
-///
-/// Uses DOM createElement (not innerHTML) for YouTube's Trusted Types CSP.
-/// Controls panel lives on the right side, over YouTube's recommended videos.
+/// Uses DOM createElement for YouTube's Trusted Types CSP.
 class WebviewOverlay {
-  /// Full overlay with scoring display + inline controls panel.
+  /// Full overlay with scoring + toggleable controls panel.
   static String injectOverlayJs({
     required String singerName,
     required String activePreset,
@@ -16,26 +14,52 @@ class WebviewOverlay {
       var overlay = document.createElement('div');
       overlay.id = 'fk-overlay';
 
-      // --- Song title (top left) ---
-      var singer = document.createElement('div');
-      singer.id = 'fk-singer';
-      singer.textContent = '$singerName';
-      singer.style.cssText = 'position:fixed;top:14px;left:14px;z-index:99999;'
-        + 'background:linear-gradient(135deg,rgba(108,92,231,0.85),rgba(0,0,0,0.7));'
-        + 'color:#fff;padding:10px 18px;border-radius:24px;'
-        + 'font-family:system-ui,sans-serif;font-size:14px;font-weight:600;'
-        + 'pointer-events:none;max-width:40%;'
-        + 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
-        + 'box-shadow:0 2px 20px rgba(108,92,231,0.4);';
-      overlay.appendChild(singer);
+      // --- Gear button (top left, toggles settings panel) ---
+      var gearBtn = document.createElement('div');
+      gearBtn.id = 'fk-gear';
+      gearBtn.textContent = '\\u2699';
+      gearBtn.style.cssText = 'position:fixed;top:14px;left:14px;z-index:100001;'
+        + 'width:40px;height:40px;border-radius:50%;'
+        + 'background:rgba(0,0,0,0.7);color:rgba(255,255,255,0.6);'
+        + 'font-size:22px;display:flex;align-items:center;justify-content:center;'
+        + 'cursor:pointer;pointer-events:auto;'
+        + 'border:1px solid rgba(255,255,255,0.2);transition:all 0.2s ease;'
+        + 'user-select:none;-webkit-user-select:none;';
+      gearBtn.addEventListener('mouseenter', function() {
+        gearBtn.style.color = '#00d2ff';
+        gearBtn.style.borderColor = 'rgba(0,210,255,0.5)';
+      });
+      gearBtn.addEventListener('mouseleave', function() {
+        var panel = document.getElementById('fk-controls');
+        var isOpen = panel && panel.style.display !== 'none';
+        if (!isOpen) {
+          gearBtn.style.color = 'rgba(255,255,255,0.6)';
+          gearBtn.style.borderColor = 'rgba(255,255,255,0.2)';
+        }
+      });
+      gearBtn.addEventListener('click', function(e) {
+        e.stopPropagation(); e.preventDefault();
+        var panel = document.getElementById('fk-controls');
+        if (!panel) return;
+        var isOpen = panel.style.display !== 'none';
+        panel.style.display = isOpen ? 'none' : 'block';
+        gearBtn.style.color = isOpen ? 'rgba(255,255,255,0.6)' : '#00d2ff';
+        gearBtn.style.borderColor = isOpen ? 'rgba(255,255,255,0.2)' : 'rgba(0,210,255,0.5)';
+      }, true);
+      gearBtn.addEventListener('mousedown', function(e){ e.stopPropagation(); }, true);
+      overlay.appendChild(gearBtn);
 
-      // --- Current note + mic dot (top, center-right) ---
+      // --- Score box (bottom right) with note display on top ---
+      var scoreContainer = document.createElement('div');
+      scoreContainer.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:99999;'
+        + 'pointer-events:none;display:flex;flex-direction:column;align-items:center;gap:8px;';
+
+      // Note display (on top of score)
       var noteBox = document.createElement('div');
       noteBox.id = 'fk-note-box';
-      noteBox.style.cssText = 'position:fixed;top:14px;right:340px;z-index:99999;'
-        + 'background:rgba(0,0,0,0.75);padding:8px 16px;border-radius:16px;'
-        + 'font-family:system-ui,sans-serif;pointer-events:none;display:flex;'
-        + 'align-items:center;gap:10px;border:1px solid rgba(0,210,255,0.3);';
+      noteBox.style.cssText = 'background:rgba(0,0,0,0.75);padding:6px 14px;border-radius:14px;'
+        + 'font-family:system-ui,sans-serif;display:flex;'
+        + 'align-items:center;gap:8px;border:1px solid rgba(0,210,255,0.3);';
       var micDot = document.createElement('div');
       micDot.id = 'fk-mic-dot';
       micDot.style.cssText = 'width:10px;height:10px;border-radius:50%;'
@@ -43,23 +67,21 @@ class WebviewOverlay {
       noteBox.appendChild(micDot);
       var noteLabel = document.createElement('div');
       noteLabel.id = 'fk-note-label';
-      noteLabel.style.cssText = 'color:#00d2ff;font-size:22px;font-weight:700;'
-        + 'min-width:48px;text-align:center;text-shadow:0 0 10px rgba(0,210,255,0.5);';
+      noteLabel.style.cssText = 'color:#00d2ff;font-size:20px;font-weight:700;'
+        + 'min-width:42px;text-align:center;text-shadow:0 0 10px rgba(0,210,255,0.5);';
       noteLabel.textContent = '--';
       noteBox.appendChild(noteLabel);
-      overlay.appendChild(noteBox);
+      scoreContainer.appendChild(noteBox);
 
-      // --- Score display (bottom left, above pitch canvas) ---
+      // Score display
       var scoreBox = document.createElement('div');
       scoreBox.id = 'fk-score';
-      scoreBox.style.cssText = 'position:fixed;bottom:150px;left:24px;z-index:99999;'
-        + 'background:rgba(0,0,0,0.8);padding:16px 24px;border-radius:20px;'
-        + 'font-family:system-ui,sans-serif;text-align:center;pointer-events:none;'
+      scoreBox.style.cssText = 'background:rgba(0,0,0,0.8);padding:14px 22px;border-radius:20px;'
+        + 'font-family:system-ui,sans-serif;text-align:center;'
         + 'border:2px solid rgba(0,210,255,0.3);min-width:110px;'
         + 'box-shadow:0 4px 30px rgba(0,210,255,0.2);';
       var scoreLabel = document.createElement('div');
-      scoreLabel.style.cssText = 'font-size:10px;color:rgba(255,255,255,0.4);'
-        + 'letter-spacing:3px;margin-bottom:4px;';
+      scoreLabel.style.cssText = 'font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:3px;margin-bottom:4px;';
       scoreLabel.textContent = 'SCORE';
       scoreBox.appendChild(scoreLabel);
       var scoreValue = document.createElement('div');
@@ -75,14 +97,13 @@ class WebviewOverlay {
         + 'margin-top:4px;min-height:14px;transition:color 0.3s;';
       scoreBox.appendChild(scoreFeedback);
 
-      // Overall score (smaller, below live score)
+      // Overall score row
       var overallRow = document.createElement('div');
       overallRow.style.cssText = 'margin-top:8px;padding-top:8px;'
         + 'border-top:1px solid rgba(255,255,255,0.1);'
         + 'display:flex;align-items:baseline;justify-content:center;gap:6px;';
       var overallLabel = document.createElement('div');
-      overallLabel.style.cssText = 'font-size:9px;color:rgba(255,255,255,0.3);'
-        + 'letter-spacing:2px;';
+      overallLabel.style.cssText = 'font-size:9px;color:rgba(255,255,255,0.3);letter-spacing:2px;';
       overallLabel.textContent = 'OVERALL';
       overallRow.appendChild(overallLabel);
       var overallValue = document.createElement('div');
@@ -93,7 +114,21 @@ class WebviewOverlay {
       overallRow.appendChild(overallValue);
       scoreBox.appendChild(overallRow);
 
-      overlay.appendChild(scoreBox);
+      scoreContainer.appendChild(scoreBox);
+      overlay.appendChild(scoreContainer);
+
+      // --- Song title (bottom right, below score) ---
+      var singer = document.createElement('div');
+      singer.id = 'fk-singer';
+      singer.textContent = '$singerName';
+      singer.style.cssText = 'position:fixed;bottom:24px;right:170px;z-index:99999;'
+        + 'background:linear-gradient(135deg,rgba(108,92,231,0.85),rgba(0,0,0,0.7));'
+        + 'color:#fff;padding:8px 16px;border-radius:20px;'
+        + 'font-family:system-ui,sans-serif;font-size:12px;font-weight:600;'
+        + 'pointer-events:none;max-width:35%;'
+        + 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
+        + 'box-shadow:0 2px 16px rgba(108,92,231,0.3);';
+      overlay.appendChild(singer);
 
       // --- Pitch canvas (bottom left) ---
       var pitchCanvas = document.createElement('canvas');
@@ -107,14 +142,14 @@ class WebviewOverlay {
         + 'box-shadow:0 4px 30px rgba(0,0,0,0.5);';
       overlay.appendChild(pitchCanvas);
 
-      // --- Right-side control panel (over YouTube recommended videos) ---
+      // --- Settings panel (right side, hidden by default) ---
       var panel = document.createElement('div');
       panel.id = 'fk-controls';
-      panel.style.cssText = 'position:fixed;top:56px;right:14px;z-index:100000;'
-        + 'width:300px;background:rgba(0,0,0,0.85);border-radius:16px;'
+      panel.style.cssText = 'position:fixed;top:14px;left:60px;z-index:100000;'
+        + 'width:280px;background:rgba(0,0,0,0.9);border-radius:16px;'
         + 'padding:16px;font-family:system-ui,sans-serif;color:#fff;'
-        + 'pointer-events:auto;border:1px solid rgba(108,92,231,0.3);'
-        + 'box-shadow:0 4px 30px rgba(0,0,0,0.6);';
+        + 'pointer-events:auto;border:1px solid rgba(108,92,231,0.4);'
+        + 'box-shadow:0 8px 40px rgba(0,0,0,0.7);display:none;';
 
       // Preset section
       var presetLabel = document.createElement('div');
@@ -128,9 +163,9 @@ class WebviewOverlay {
       presetRow.style.cssText = 'display:flex;gap:6px;margin-bottom:16px;';
 
       var presets = [
-        {id:'externalMic', label:'🎤 Clean', desc:'External mic'},
-        {id:'roomMic', label:'🏠 Room', desc:'Built-in mic'},
-        {id:'partyMode', label:'🎉 Party', desc:'Noisy/fun'}
+        {id:'externalMic', label:'\\u{1F3A4} Clean'},
+        {id:'roomMic', label:'\\u{1F3E0} Room'},
+        {id:'partyMode', label:'\\u{1F389} Party'}
       ];
       for (var i = 0; i < presets.length; i++) {
         var p = presets[i];
@@ -138,7 +173,6 @@ class WebviewOverlay {
         btn.id = 'fk-preset-' + p.id;
         btn.setAttribute('data-preset', p.id);
         btn.textContent = p.label;
-        btn.title = p.desc;
         var isActive = p.id === '$activePreset';
         btn.style.cssText = 'flex:1;padding:8px 4px;border-radius:10px;'
           + 'text-align:center;cursor:pointer;font-size:12px;font-weight:600;'
@@ -146,12 +180,12 @@ class WebviewOverlay {
           + (isActive
             ? 'background:rgba(108,92,231,0.6);border:1px solid rgba(108,92,231,0.8);color:#fff;'
             : 'background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);');
-        btn.addEventListener('click', (function(presetId) {
+        btn.addEventListener('click', (function(pid) {
           return function(e) {
             e.stopPropagation(); e.preventDefault();
             if (window.webkit && window.webkit.messageHandlers &&
                 window.webkit.messageHandlers.FrankPreset) {
-              window.webkit.messageHandlers.FrankPreset.postMessage(presetId);
+              window.webkit.messageHandlers.FrankPreset.postMessage(pid);
             }
           };
         })(p.id), true);
@@ -168,8 +202,7 @@ class WebviewOverlay {
       pitchLabel.textContent = 'PITCH SHIFT';
       var pitchValueLabel = document.createElement('span');
       pitchValueLabel.id = 'fk-pitch-value';
-      pitchValueLabel.style.cssText = 'color:#00d2ff;font-size:14px;font-weight:700;'
-        + 'letter-spacing:0;';
+      pitchValueLabel.style.cssText = 'color:#00d2ff;font-size:14px;font-weight:700;letter-spacing:0;';
       pitchValueLabel.textContent = ($pitchShift > 0 ? '+' : '') + '$pitchShift';
       pitchLabel.appendChild(pitchValueLabel);
       panel.appendChild(pitchLabel);
@@ -177,23 +210,25 @@ class WebviewOverlay {
       var pitchRow = document.createElement('div');
       pitchRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:16px;';
 
-      var pitchDown = document.createElement('div');
-      pitchDown.textContent = '−';
-      pitchDown.style.cssText = 'width:32px;height:32px;border-radius:50%;'
-        + 'background:rgba(255,255,255,0.1);color:#fff;font-size:18px;'
-        + 'display:flex;align-items:center;justify-content:center;cursor:pointer;'
-        + 'user-select:none;-webkit-user-select:none;transition:background 0.2s;';
-      pitchDown.addEventListener('click', function(e) {
-        e.stopPropagation(); e.preventDefault();
-        if (window.webkit && window.webkit.messageHandlers &&
-            window.webkit.messageHandlers.FrankPitch) {
-          window.webkit.messageHandlers.FrankPitch.postMessage('down');
-        }
-      }, true);
-      pitchDown.addEventListener('mousedown', function(e){ e.stopPropagation(); }, true);
-      pitchRow.appendChild(pitchDown);
+      function mkPitchBtn(label, dir) {
+        var b = document.createElement('div');
+        b.textContent = label;
+        b.style.cssText = 'width:32px;height:32px;border-radius:50%;'
+          + 'background:rgba(255,255,255,0.1);color:#fff;font-size:18px;'
+          + 'display:flex;align-items:center;justify-content:center;cursor:pointer;'
+          + 'user-select:none;-webkit-user-select:none;transition:background 0.2s;';
+        b.addEventListener('click', function(e) {
+          e.stopPropagation(); e.preventDefault();
+          if (window.webkit && window.webkit.messageHandlers &&
+              window.webkit.messageHandlers.FrankPitch) {
+            window.webkit.messageHandlers.FrankPitch.postMessage(dir);
+          }
+        }, true);
+        b.addEventListener('mousedown', function(e){ e.stopPropagation(); }, true);
+        return b;
+      }
+      pitchRow.appendChild(mkPitchBtn('\\u2212', 'down'));
 
-      // Visual pitch bar
       var pitchBar = document.createElement('div');
       pitchBar.style.cssText = 'flex:1;height:6px;background:rgba(255,255,255,0.1);'
         + 'border-radius:3px;position:relative;';
@@ -204,29 +239,12 @@ class WebviewOverlay {
         + 'width:' + fillPct + '%;background:linear-gradient(90deg,#6c5ce7,#00d2ff);'
         + 'border-radius:3px;transition:width 0.2s;';
       pitchBar.appendChild(pitchFill);
-      // Center marker
       var centerMark = document.createElement('div');
       centerMark.style.cssText = 'position:absolute;left:50%;top:-4px;'
-        + 'width:2px;height:14px;background:rgba(255,255,255,0.2);'
-        + 'transform:translateX(-50%);';
+        + 'width:2px;height:14px;background:rgba(255,255,255,0.2);transform:translateX(-50%);';
       pitchBar.appendChild(centerMark);
       pitchRow.appendChild(pitchBar);
-
-      var pitchUp = document.createElement('div');
-      pitchUp.textContent = '+';
-      pitchUp.style.cssText = 'width:32px;height:32px;border-radius:50%;'
-        + 'background:rgba(255,255,255,0.1);color:#fff;font-size:18px;'
-        + 'display:flex;align-items:center;justify-content:center;cursor:pointer;'
-        + 'user-select:none;-webkit-user-select:none;transition:background 0.2s;';
-      pitchUp.addEventListener('click', function(e) {
-        e.stopPropagation(); e.preventDefault();
-        if (window.webkit && window.webkit.messageHandlers &&
-            window.webkit.messageHandlers.FrankPitch) {
-          window.webkit.messageHandlers.FrankPitch.postMessage('up');
-        }
-      }, true);
-      pitchUp.addEventListener('mousedown', function(e){ e.stopPropagation(); }, true);
-      pitchRow.appendChild(pitchUp);
+      pitchRow.appendChild(mkPitchBtn('+', 'up'));
       panel.appendChild(pitchRow);
 
       // Restart button
@@ -235,8 +253,7 @@ class WebviewOverlay {
       restartBtn.style.cssText = 'padding:10px;border-radius:10px;'
         + 'background:rgba(255,159,67,0.15);border:1px solid rgba(255,159,67,0.3);'
         + 'color:#ff9f43;font-size:13px;font-weight:600;text-align:center;'
-        + 'cursor:pointer;user-select:none;-webkit-user-select:none;'
-        + 'transition:all 0.2s;';
+        + 'cursor:pointer;user-select:none;-webkit-user-select:none;transition:all 0.2s;';
       restartBtn.addEventListener('mouseenter', function() {
         restartBtn.style.background = 'rgba(255,159,67,0.3)';
       });
@@ -261,7 +278,6 @@ class WebviewOverlay {
     })();
   ''';
 
-  /// Update the active preset button highlight.
   static String updatePresetJs(String presetId) => '''
     (function() {
       var ids = ['externalMic','roomMic','partyMode'];
@@ -281,7 +297,6 @@ class WebviewOverlay {
     })();
   ''';
 
-  /// Update the pitch shift display.
   static String updatePitchShiftJs(int semitones) {
     final label = (semitones > 0 ? '+' : '') + semitones.toString();
     final fillPct = ((semitones + 6) / 12 * 100).clamp(0, 100).toStringAsFixed(1);
@@ -308,7 +323,6 @@ class WebviewOverlay {
     } else {
       color = '#ff6b6b'; glow = '0 0 15px rgba(255,107,107,0.3)'; feedback = '';
     }
-    // Overall score color: dim version of live color
     String oColor;
     if (overallScore >= 75) { oColor = 'rgba(0,255,136,0.7)'; }
     else if (overallScore >= 50) { oColor = 'rgba(0,210,255,0.7)'; }
@@ -340,7 +354,6 @@ class WebviewOverlay {
         var trail=window._fkTrail;
         var ctx=canvas.getContext('2d'), w=canvas.width, h=canvas.height, pad=6;
         ctx.clearRect(0,0,w,h);
-        // Note grid with log scale (matches Dart's _logNormalize(hz, 100, 800))
         var nf=[130.81,196,261.63,392,523.25,783.99], nn=['C3','G3','C4','G4','C5','G5'];
         var logMin=Math.log(100), logRange=Math.log(800)-logMin;
         ctx.font='9px system-ui';
