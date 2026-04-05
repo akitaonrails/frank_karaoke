@@ -216,7 +216,13 @@ class WebviewOverlay {
       scoreBox.style.cssText = 'background:rgba(0,0,0,0.8);padding:14px 22px;border-radius:20px;'
         + 'font-family:system-ui,sans-serif;text-align:center;'
         + 'border:2px solid rgba(0,210,255,0.3);min-width:110px;'
-        + 'box-shadow:0 4px 30px rgba(0,210,255,0.2);';
+        + 'box-shadow:0 4px 30px rgba(0,210,255,0.2);'
+        + 'cursor:pointer;pointer-events:auto;';
+      scoreBox.addEventListener('click', function(e) {
+        e.stopPropagation(); e.preventDefault();
+        if (window.FrankScoreInfo) FrankScoreInfo.postMessage('open');
+      }, true);
+      scoreBox.addEventListener('mousedown', function(e){ e.stopPropagation(); }, true);
       var scoreLabel = document.createElement('div');
       scoreLabel.style.cssText = 'font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:3px;margin-bottom:4px;';
       scoreLabel.textContent = 'SCORE';
@@ -770,6 +776,82 @@ class WebviewOverlay {
       })();
     ''';
   }
+
+  /// Detailed scoring info overlay — explains all 4 modes.
+  static String scoreInfoOverlayJs(String activeMode) => '''
+    (function() {
+      var old = document.getElementById('fk-score-info');
+      if (old) { old.remove(); return; } // toggle off
+
+      var bg = document.createElement('div');
+      bg.id = 'fk-score-info';
+      bg.style.cssText = 'position:fixed;inset:0;z-index:999998;'
+        + 'background:rgba(0,0,0,0.85);display:flex;align-items:center;'
+        + 'justify-content:center;font-family:system-ui,sans-serif;'
+        + 'pointer-events:auto;';
+
+      var card = document.createElement('div');
+      card.style.cssText = 'max-width:500px;background:rgba(20,20,40,0.95);'
+        + 'border-radius:20px;padding:28px 32px;color:#fff;'
+        + 'border:1px solid rgba(108,92,231,0.4);'
+        + 'box-shadow:0 8px 40px rgba(0,0,0,0.6);max-height:80vh;overflow-y:auto;';
+
+      var title = document.createElement('div');
+      title.style.cssText = 'font-size:22px;font-weight:800;margin-bottom:16px;color:#00d2ff;';
+      title.textContent = 'Scoring Modes';
+      card.appendChild(title);
+
+      var modes = [
+        {id:'pitchClass', name:'Pitch Match', icon:'\\u{1F3AF}',
+          desc:'Scores how cleanly you hit musical notes. The app detects the pitch of your voice and checks if it lands precisely on a note (C, D, E...) rather than drifting between notes. Best when you know the song and want to nail the exact notes. Holding steady notes scores higher than wobbling.'},
+        {id:'contour', name:'Contour', icon:'\\u{3030}',
+          desc:'Scores the shape of your melody — are you going up when the melody goes up, and down when it goes down? This mode does not care which exact note you hit, only the direction and flow of your singing. Great when learning a new song or singing in a comfortable key.'},
+        {id:'interval', name:'Intervals', icon:'\\u{1F4D0}',
+          desc:'Scores the jumps between consecutive notes. A step up of 2 semitones (whole step) scores highest. Small musical intervals like thirds and fourths score well. Wild jumps of an octave or more score low. Rewards singing with proper musical phrasing regardless of your key.'},
+        {id:'streak', name:'Streak', icon:'\\u{1F525}',
+          desc:'Pitch scoring with a combo multiplier! Every consecutive good frame builds your streak counter (5x, 15x, 30x). The longer your streak, the more bonus points. But one bad note resets the counter to zero. Silence (pauses, instrumental breaks) freezes the streak safely. The most exciting and competitive mode!'}
+      ];
+
+      for (var i = 0; i < modes.length; i++) {
+        var m = modes[i];
+        var isActive = m.id === '$activeMode';
+        var row = document.createElement('div');
+        row.style.cssText = 'padding:12px 14px;margin-bottom:10px;border-radius:12px;'
+          + (isActive
+            ? 'background:rgba(0,210,255,0.15);border:1px solid rgba(0,210,255,0.4);'
+            : 'background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06);');
+        var header = document.createElement('div');
+        header.style.cssText = 'font-size:15px;font-weight:700;margin-bottom:4px;'
+          + (isActive ? 'color:#00d2ff;' : 'color:rgba(255,255,255,0.7);');
+        header.textContent = m.icon + ' ' + m.name + (isActive ? ' (active)' : '');
+        row.appendChild(header);
+        var desc = document.createElement('div');
+        desc.style.cssText = 'font-size:12px;line-height:1.5;'
+          + (isActive ? 'color:rgba(0,210,255,0.7);' : 'color:rgba(255,255,255,0.4);');
+        desc.textContent = m.desc;
+        row.appendChild(desc);
+        card.appendChild(row);
+      }
+
+      var closeBtn = document.createElement('div');
+      closeBtn.textContent = 'Close';
+      closeBtn.style.cssText = 'margin-top:12px;padding:10px;border-radius:12px;'
+        + 'background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);'
+        + 'font-size:14px;font-weight:600;text-align:center;cursor:pointer;';
+      closeBtn.addEventListener('click', function(e) {
+        e.stopPropagation(); e.preventDefault();
+        bg.remove();
+      }, true);
+      closeBtn.addEventListener('mousedown', function(e){ e.stopPropagation(); }, true);
+      card.appendChild(closeBtn);
+
+      bg.appendChild(card);
+      bg.addEventListener('click', function(e) {
+        if (e.target === bg) bg.remove();
+      }, true);
+      document.body.appendChild(bg);
+    })();
+  ''';
 
   static String updateSingerJs(String name) => '''
     (function(){var el=document.getElementById('fk-singer');if(el)el.textContent='$name';})();

@@ -82,6 +82,7 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
       ..addJavaScriptChannel('FrankRestart', onMessageReceived: (_) => _restartScoring())
       ..addJavaScriptChannel('FrankCalibrate', onMessageReceived: (_) => _calibrateMic())
       ..addJavaScriptChannel('FrankDismissWelcome', onMessageReceived: (_) => _dismissWelcome())
+      ..addJavaScriptChannel('FrankScoreInfo', onMessageReceived: (_) => _showScoreInfo())
       ..loadRequest(Uri.parse(kYouTubeDesktopUrl));
   }
 
@@ -108,6 +109,24 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
           }
         });
         observer.observe(document.body, {childList:true,subtree:true});
+
+        // Monitor video play/pause/seek for scoring sync.
+        function watchVideo() {
+          var v = document.querySelector('video');
+          if (!v) { setTimeout(watchVideo, 1000); return; }
+          v.addEventListener('play', function() {
+            FrankKaraoke.postMessage(JSON.stringify({type:'play'}));
+          });
+          v.addEventListener('pause', function() {
+            FrankKaraoke.postMessage(JSON.stringify({type:'pause'}));
+          });
+          v.addEventListener('seeked', function() {
+            FrankKaraoke.postMessage(JSON.stringify({
+              type:'seeked', time: v.currentTime
+            }));
+          });
+        }
+        watchVideo();
       })();
     ''');
   }
@@ -142,13 +161,49 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
   void _onJsMessage(JavaScriptMessage message) {
     try {
       final data = jsonDecode(message.message);
-      if (data is Map && data['type'] == 'urlChange') {
-        _onUrlChange(data['url'] as String?);
+      if (data is! Map) return;
+      switch (data['type']) {
+        case 'urlChange':
+          _onUrlChange(data['url'] as String?);
+        case 'play':
+          _onVideoPlay();
+        case 'pause':
+          _onVideoPause();
+        case 'seeked':
+          _onVideoSeeked();
       }
     } catch (_) {}
   }
 
+  void _onVideoPlay() {
+    debugPrint('Video: play');
+    if (_scoringSession != null && !_scoringSession!.isActive) {
+      // Resume scoring after a short delay.
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted && _scoringSession != null) {
+          _scoringSession!.resume();
+          debugPrint('Scoring: resumed');
+        }
+      });
+    }
+  }
+
+  void _onVideoPause() {
+    debugPrint('Video: pause');
+    _scoringSession?.pause();
+  }
+
+  void _onVideoSeeked() {
+    debugPrint('Video: seeked — resetting score');
+    if (_scoringSession != null) {
+      _scoringSession!.resetScore();
+    }
+  }
+
   Future<void> _onVideoDetected(String videoId) async {
+    // Show loading overlay immediately.
+    _runJs(WebviewOverlay.processingOverlayJs(true, message: 'Loading...'));
+
     final syncService = ref.read(syncServiceProvider);
     ref.read(isAudioSyncingProvider.notifier).state = true;
 
@@ -167,10 +222,9 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
       _runJs(YouTubeSyncService.muteVideoJs);
     }
 
-    // Get audio stream info once — used for both oracle and future reference.
     final streamInfo = await audioService.getAudioStreamInfo(videoId);
 
-    // Start scoring immediately — oracle loads in background.
+    // Start scoring with a 5-second warmup delay.
     if (mounted) _startScoring();
 
     // Build pitch oracle in the background.
@@ -422,6 +476,11 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
 
     _runJs(WebviewOverlay.updateCalibrateJs('\\u{2705} Calibrated'));
     if (_scoringSession != null) _restartScoring();
+  }
+
+  void _showScoreInfo() {
+    final mode = ref.read(scoringModeProvider);
+    _runJs(WebviewOverlay.scoreInfoOverlayJs(mode.name));
   }
 
   Future<void> _dismissWelcome() async {

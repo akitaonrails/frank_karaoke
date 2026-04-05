@@ -89,8 +89,11 @@ class ScoringSession {
 
   Stream<ScoringUpdate> get scoreStream => _scoreController.stream;
   bool get isActive => _isActive;
+  bool get isPaused => _isPaused;
   bool get hasReference => _hasReference;
   ScoringMode get mode => _mode;
+  bool _isPaused = false;
+  bool _warmupDone = false;
 
   int get currentScore {
     if (!_emaInitialized) return 0;
@@ -108,6 +111,36 @@ class ScoringSession {
   void setOracle(PitchOracle oracle) {
     _oracle = oracle;
     debugPrint('ScoringSession: oracle connected (${oracle.entryCount} entries)');
+  }
+
+  /// Pause scoring (video paused). Mic keeps running but frames are ignored.
+  void pause() {
+    _isPaused = true;
+  }
+
+  /// Resume scoring (video playing again).
+  void resume() {
+    _isPaused = false;
+  }
+
+  /// Reset scores to zero (video seeked/restarted).
+  void resetScore() {
+    _emaScore = 0;
+    _emaInitialized = false;
+    _totalVoicedFrames = 0;
+    _allTimeScoreSum = 0;
+    _streakCount = 0;
+    _recentPitches.clear();
+    _singerContour.clear();
+    _prevSingerMidi = 0;
+    _prevSingerPitch = 0;
+    _warmupDone = false;
+    // Restart warmup timer.
+    Future.delayed(const Duration(seconds: 5), () {
+      _warmupDone = true;
+      debugPrint('Scoring: warmup complete, scoring active');
+    });
+    debugPrint('Scoring: score reset, 5s warmup started');
   }
 
   /// Feed a reference audio frame (Android: from just_audio PCM tap).
@@ -142,9 +175,17 @@ class ScoringSession {
     _currentReferenceFrame = null;
     _voiceIsolator.reset();
     _bandpass.reset();
+    _isPaused = false;
+    _warmupDone = false;
     _isActive = true;
     _processedFrames = 0;
     _playbackStartTime = DateTime.now();
+
+    // 5-second warmup: ignore initial noise/clicks from playback start.
+    Future.delayed(const Duration(seconds: 5), () {
+      _warmupDone = true;
+      debugPrint('Scoring: warmup complete');
+    });
 
     _micSub = _mic.pcmStream.listen((frame) => _onMicFrame(frame.samples, frame.rawPeak));
     debugPrint('ScoringSession: started mode=${_mode.name} '
@@ -155,7 +196,7 @@ class ScoringSession {
   int _processedFrames = 0;
 
   void _onMicFrame(Float64List normalizedSamples, double rawPeak) {
-    if (!_isActive) return;
+    if (!_isActive || _isPaused || !_warmupDone) return;
 
     // Processing pipeline:
     // 1. Voice isolator (spectral subtraction when reference available)
