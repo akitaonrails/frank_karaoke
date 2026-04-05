@@ -126,11 +126,17 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
     // Inject overlay regardless of mic (shows song info even without scoring).
     if (_created) {
       final title = ref.read(currentVideoTitleProvider) ?? '';
-      await _controller.evaluateJavascript(
-        source: WebviewOverlay.injectOverlayJs(singerName: title),
-      );
-      _overlayInjected = true;
-      _lastInjectedScore = -1;
+      debugPrint('Overlay: injecting for "$title"');
+      try {
+        await _controller.evaluateJavascript(
+          source: WebviewOverlay.injectOverlayJs(singerName: title),
+        );
+        _overlayInjected = true;
+        _lastInjectedScore = -1;
+        debugPrint('Overlay: injected successfully');
+      } catch (e) {
+        debugPrint('Overlay: injection failed: $e');
+      }
     }
 
     _scoreSub = _scoringSession?.scoreStream.listen(_onScoreUpdate);
@@ -159,8 +165,9 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       ),
     );
 
-    // Update mic activity bar.
-    final normalizedRms = (update.rmsEnergy * 5).clamp(0.0, 1.0);
+    // Update mic activity dot. Scale RMS aggressively — desktop mics
+    // produce very low values (0.001-0.01 typical).
+    final normalizedRms = (update.rmsEnergy * 100).clamp(0.0, 1.0);
     _controller.evaluateJavascript(
       source: WebviewOverlay.updateRmsJs(normalizedRms),
     );

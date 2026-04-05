@@ -49,7 +49,16 @@ class MicCaptureService {
     }
   }
 
+  int _frameCount = 0;
+
   void _onAudioData(Uint8List bytes) {
+    if (bytes.isEmpty) return;
+
+    _frameCount++;
+    if (_frameCount <= 3 || _frameCount % 100 == 0) {
+      debugPrint('MicCapture: frame #$_frameCount, ${bytes.length} bytes');
+    }
+
     // Convert 16-bit signed PCM to double array (-1.0 to 1.0).
     final samples = Float64List(bytes.length ~/ 2);
     final byteData = ByteData.sublistView(bytes);

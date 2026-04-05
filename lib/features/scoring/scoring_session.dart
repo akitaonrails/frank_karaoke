@@ -52,13 +52,24 @@ class ScoringSession {
     return true;
   }
 
+  int _processedFrames = 0;
+  int _gatedFrames = 0;
+
   void _onMicFrame(Float64List samples) {
     if (!_isActive) return;
 
-    // Noise gate: skip silent/quiet frames.
     final rms = PitchDetector.rmsEnergy(samples);
+
+    _processedFrames++;
+    if (_processedFrames <= 3 || _processedFrames % 200 == 0) {
+      debugPrint('Scoring: frame #$_processedFrames, '
+          'rms=${rms.toStringAsFixed(4)}, '
+          'gated=$_gatedFrames/$_processedFrames, '
+          'samples=${samples.length}');
+    }
+
     if (rms < _noiseGateThreshold) {
-      // Too quiet — don't penalize, just skip.
+      _gatedFrames++;
       return;
     }
 
