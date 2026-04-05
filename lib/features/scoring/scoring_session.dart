@@ -145,14 +145,13 @@ class ScoringSession {
     // Pitch detection on cleaned signal
     final pitchHz = _pitchDetector.detectPitch(samples);
     if (pitchHz < 60) {
-      // Unpitched sound — push a low score into the window
-      _pushScore(0.1);
+      // Unpitched sound — skip, don't dilute the score window.
       _scoreController.add(ScoringUpdate(
         singerPitchHz: 0,
         noteName: '--',
         chromaticSnapScore: 0,
         stabilityScore: 0,
-        frameScore: 0.1,
+        frameScore: 0,
         totalScore: currentScore,
         rmsEnergy: rms,
       ));
@@ -160,10 +159,12 @@ class ScoringSession {
     }
 
     // --- Chromatic snap (50%) ---
+    // How close to the nearest musical note? 100-cent tolerance (1 semitone)
+    // is generous enough for party karaoke with room mic noise.
     final midi = hzToMidi(pitchHz);
     final nearestNote = midi.roundToDouble();
     final deviationCents = (midi - nearestNote).abs() * 100;
-    final snapScore = (1.0 - (deviationCents / 50.0)).clamp(0.0, 1.0);
+    final snapScore = (1.0 - (deviationCents / 100.0)).clamp(0.0, 1.0);
 
     // --- Pitch stability (35%) ---
     _recentPitches.add(midi);
