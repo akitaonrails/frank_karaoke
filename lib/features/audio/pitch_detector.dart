@@ -28,6 +28,8 @@ class PitchDetector {
   final double threshold;
 
   int _debugCount = 0;
+  Float64List? _diffBuf;
+  Float64List? _cmndfBuf;
 
   PitchDetector({
     this.sampleRate = kSampleRate,
@@ -80,7 +82,8 @@ class PitchDetector {
   }
 
   Float64List _differenceFunction(Float64List samples, int halfLen) {
-    final diff = Float64List(halfLen);
+    if (_diffBuf == null || _diffBuf!.length != halfLen) _diffBuf = Float64List(halfLen);
+    final diff = _diffBuf!;
     for (var tau = 1; tau < halfLen; tau++) {
       double sum = 0.0;
       for (var i = 0; i < halfLen; i++) {
@@ -93,7 +96,8 @@ class PitchDetector {
   }
 
   Float64List _cumulativeMeanNormalized(Float64List diff, int halfLen) {
-    final cmndf = Float64List(halfLen);
+    if (_cmndfBuf == null || _cmndfBuf!.length != halfLen) _cmndfBuf = Float64List(halfLen);
+    final cmndf = _cmndfBuf!;
     cmndf[0] = 1.0;
     double runningSum = 0.0;
     for (var tau = 1; tau < halfLen; tau++) {

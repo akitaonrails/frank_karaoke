@@ -135,14 +135,18 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
   void _injectBridge() {
     _runJs('''
       (function() {
+        // Disconnect previous observers if page reloaded.
+        if (window._fkBridgeObserver) window._fkBridgeObserver.disconnect();
+        if (window._fkVideoObserver) window._fkVideoObserver.disconnect();
+
         let lastUrl = location.href;
-        const observer = new MutationObserver(() => {
+        window._fkBridgeObserver = new MutationObserver(() => {
           if (location.href !== lastUrl) {
             lastUrl = location.href;
             FrankKaraoke.postMessage(JSON.stringify({type:'urlChange',url:lastUrl}));
           }
         });
-        observer.observe(document.body, {childList:true,subtree:true});
+        window._fkBridgeObserver.observe(document.body, {childList:true,subtree:true});
 
         // Monitor video play/pause/seek for scoring sync.
         // Uses MutationObserver to re-attach when YouTube replaces the video element.
@@ -162,9 +166,10 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
           });
         }
         document.querySelectorAll('video').forEach(guardVideo);
-        new MutationObserver(function() {
+        window._fkVideoObserver = new MutationObserver(function() {
           document.querySelectorAll('video').forEach(guardVideo);
-        }).observe(document.body || document.documentElement, {childList:true, subtree:true});
+        });
+        window._fkVideoObserver.observe(document.body || document.documentElement, {childList:true, subtree:true});
       })();
     ''');
   }
@@ -440,7 +445,7 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
     await _scoreSub?.cancel();
     _scoreSub = null;
     if (_scoringSession != null) {
-      await _scoringSession!.stop();
+      await _scoringSession!.dispose();
       _scoringSession = null;
     }
     if (_overlayInjected) {

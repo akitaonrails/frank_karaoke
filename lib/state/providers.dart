@@ -38,6 +38,8 @@ final micCaptureServiceProvider = Provider<MicCaptureService>((ref) {
 });
 
 final pitchOracleProvider = Provider<PitchOracle>((ref) {
-  return PitchOracle();
+  final oracle = PitchOracle();
+  ref.onDispose(oracle.reset);
+  return oracle;
 });
 

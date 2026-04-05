@@ -23,9 +23,15 @@ class BandpassFilter {
     _lowPass = _Biquad.lowPass(highCutoff, sampleRate);
   }
 
-  /// Filter a frame of samples in place and return the filtered result.
+  Float64List? _outputBuffer;
+
+  /// Filter a frame of samples and return the filtered result.
+  /// Reuses an internal buffer to avoid per-frame allocations.
   Float64List process(Float64List samples) {
-    final result = Float64List(samples.length);
+    if (_outputBuffer == null || _outputBuffer!.length != samples.length) {
+      _outputBuffer = Float64List(samples.length);
+    }
+    final result = _outputBuffer!;
     for (var i = 0; i < samples.length; i++) {
       var s = samples[i];
       s = _highPass.process(s);

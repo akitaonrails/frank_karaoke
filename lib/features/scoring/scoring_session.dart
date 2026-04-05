@@ -94,6 +94,7 @@ class ScoringSession {
   ScoringMode get mode => _mode;
   bool _isPaused = false;
   bool _warmupDone = false;
+  Timer? _warmupTimer;
 
   int get currentScore {
     if (!_emaInitialized) return 0;
@@ -135,10 +136,10 @@ class ScoringSession {
     _prevSingerMidi = 0;
     _prevSingerPitch = 0;
     _warmupDone = false;
-    // Restart warmup timer.
-    Future.delayed(const Duration(seconds: 5), () {
+    _warmupTimer?.cancel();
+    _warmupTimer = Timer(const Duration(seconds: 5), () {
       _warmupDone = true;
-      debugPrint('Scoring: warmup complete, scoring active');
+      debugPrint('Scoring: warmup complete');
     });
     debugPrint('Scoring: score reset, 5s warmup started');
   }
@@ -182,7 +183,8 @@ class ScoringSession {
     _playbackStartTime = DateTime.now();
 
     // 5-second warmup: ignore initial noise/clicks from playback start.
-    Future.delayed(const Duration(seconds: 5), () {
+    _warmupTimer?.cancel();
+    _warmupTimer = Timer(const Duration(seconds: 5), () {
       _warmupDone = true;
       debugPrint('Scoring: warmup complete');
     });
@@ -479,6 +481,8 @@ class ScoringSession {
 
   Future<void> stop() async {
     _isActive = false;
+    _warmupTimer?.cancel();
+    _warmupTimer = null;
     await _micSub?.cancel();
     _micSub = null;
     await _mic.stop();
