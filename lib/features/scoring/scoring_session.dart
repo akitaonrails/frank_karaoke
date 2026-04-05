@@ -69,6 +69,13 @@ class ScoringSession {
   // Video playback time (seconds), updated from JS bridge.
   double _videoTimeSeconds = 0;
 
+  // Adaptive voice detection: tracks the speaker-only baseline RMS.
+  // Only scores when current RMS is significantly above this baseline,
+  // meaning someone is actively singing close to the mic.
+  final List<double> _rmsHistory = [];
+  static const _rmsHistorySize = 100; // ~4 seconds of history
+  double _baselineRms = 0;
+
   // Totals for final score
   int _totalVoicedFrames = 0;
   double _allTimeScoreSum = 0;
@@ -191,6 +198,8 @@ class ScoringSession {
     _isActive = true;
     _processedFrames = 0;
     _videoTimeSeconds = 0;
+    _rmsHistory.clear();
+    _baselineRms = 0;
 
     // 5-second warmup: ignore initial noise/clicks from playback start.
     _warmupTimer?.cancel();
@@ -224,11 +233,39 @@ class ScoringSession {
     final rms = rawPeak;
     _processedFrames++;
 
-    // Log every 10th frame to see the full picture without flooding
     final shouldLog = _processedFrames <= 10 || _processedFrames % 10 == 0;
 
+    // During warmup, collect RMS but don't score.
+    if (!_warmupDone) {
+      _rmsHistory.add(rawPeak);
+      return;
+    }
+
+    // Adaptive baseline: tracks the speaker-only RMS level.
+    // Keeps updating throughout the song using low-RMS frames
+    // (frames where nobody is singing = just speaker bleed).
+    _rmsHistory.add(rawPeak);
+    if (_rmsHistory.length > _rmsHistorySize) _rmsHistory.removeAt(0);
+
+    // Recompute baseline periodically.
+    // Use the 25th percentile: the quieter moments represent the
+    // "ambient speaker level" floor. The singer's voice adds on top.
+    if (_rmsHistory.length >= 20 && _processedFrames % 25 == 0) {
+      final sorted = List<double>.from(_rmsHistory)..sort();
+      _baselineRms = sorted[sorted.length ~/ 4]; // 25th percentile
+    }
+
+    // Voice detection: current RMS must be at least 1.3x the baseline.
+    // This is intentionally gentle — we'd rather score some speaker bleed
+    // than miss real singing. The oracle handles pitch-level bleed filtering.
+    final isVoice = _baselineRms > 0.001
+        ? rawPeak > _baselineRms * 1.3
+        : rawPeak > _singingThreshold;
+
     if (shouldLog) {
-      debugPrint('SC #$_processedFrames pk=${rawPeak.toStringAsFixed(4)}');
+      debugPrint('SC #$_processedFrames pk=${rawPeak.toStringAsFixed(4)} '
+          'base=${_baselineRms.toStringAsFixed(4)} '
+          'voice=$isVoice');
     }
 
     // Noise gate
@@ -247,10 +284,14 @@ class ScoringSession {
     }
     _silentFrames = 0;
 
-    // Singing threshold
-    if (rawPeak < _singingThreshold) {
+    // Voice detection: only score when someone is singing, not just
+    // instrumental melody bleeding through the speaker.
+    if (!isVoice) {
       if (_mode == ScoringMode.streak) _streakCount = 0;
-      if (shouldLog) debugPrint('  -> LOW (pk < sing ${_singingThreshold.toStringAsFixed(4)})');
+      if (shouldLog) {
+        debugPrint('  -> INSTRUMENT (pk=${rawPeak.toStringAsFixed(4)} '
+            'base=${_baselineRms.toStringAsFixed(4)})');
+      }
       _emit(0, 0, '--', 0, 0, 0, rms);
       return;
     }
