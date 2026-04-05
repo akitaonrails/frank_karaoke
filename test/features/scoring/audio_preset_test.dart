@@ -37,15 +37,4 @@ void main() {
     });
   });
 
-  group('AudioEffect', () {
-    test('has three options', () {
-      expect(AudioEffect.values.length, 3);
-    });
-
-    test('all effects have labels', () {
-      for (final effect in AudioEffect.values) {
-        expect(effect.label, isNotEmpty);
-      }
-    });
-  });
 }

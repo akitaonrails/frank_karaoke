@@ -15,7 +15,6 @@ import '../../core/scoring_mode.dart';
 import '../../state/providers.dart';
 import '../overlay/webview_overlay.dart';
 import '../scoring/scoring_session.dart';
-import 'youtube_sync_service.dart';
 import 'youtube_url_parser.dart';
 
 class YouTubeWebView extends ConsumerStatefulWidget {
@@ -93,24 +92,6 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
     _injectBridge();
     _runJs(_cleanYouTubeUiJs);
     _runJs(_replaceLogoJs);
-    // Dump header DOM for logo debugging.
-    Future.delayed(const Duration(seconds: 3), () async {
-      try {
-        final result = await _controller.runJavaScriptReturningResult('''
-          (function() {
-            var h = document.querySelector('header')
-              || document.querySelector('#masthead')
-              || document.querySelector('ytd-masthead');
-            if (!h) return 'NO_HEADER';
-            var html = h.innerHTML.substring(0, 800);
-            return html;
-          })();
-        ''');
-        debugPrint('HEADER: $result');
-      } catch (e) {
-        debugPrint('HEADER err: $e');
-      }
-    });
     // Block auto-play: intercept the video element whenever it appears.
     // YouTube dynamically creates/replaces video elements, so we use
     // MutationObserver to catch them all. Every video gets a play listener
@@ -311,23 +292,19 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
     _runJs('''(function(){var v=document.querySelector('video');if(v)v.pause();})();''');
     _runJs(WebviewOverlay.processingOverlayJs(true, message: 'Loading...'));
 
-    final syncService = ref.read(syncServiceProvider);
     ref.read(isAudioSyncingProvider.notifier).state = true;
 
     final audioService = ref.read(youtubeAudioServiceProvider);
     final title = await audioService.getVideoTitle(videoId);
     if (mounted) ref.read(currentVideoTitleProvider.notifier).state = title;
 
-    await syncService.onVideoDetected(videoId);
+    debugPrint('Video detected: $videoId');
 
     if (mounted) {
       ref.read(isAudioSyncingProvider.notifier).state = false;
       ref.read(isVideoPlayingProvider.notifier).state = true;
     }
 
-    if (syncService.shouldMuteWebview) {
-      _runJs(YouTubeSyncService.muteVideoJs);
-    }
 
     final streamInfo = await audioService.getAudioStreamInfo(videoId);
 

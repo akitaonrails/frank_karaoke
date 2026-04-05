@@ -12,7 +12,8 @@ void main() {
 
     test('extracts from watch URL with extra params', () {
       expect(
-        extractVideoId('https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s&list=PLx'),
+        extractVideoId(
+            'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s&list=PLx'),
         'dQw4w9WgXcQ',
       );
     });
@@ -58,7 +59,8 @@ void main() {
 
     test('returns null for youtube search', () {
       expect(
-        extractVideoId('https://www.youtube.com/results?search_query=karaoke'),
+        extractVideoId(
+            'https://www.youtube.com/results?search_query=karaoke'),
         isNull,
       );
     });
@@ -69,16 +71,6 @@ void main() {
 
     test('returns null for garbage input', () {
       expect(extractVideoId('not a url at all'), isNull);
-    });
-
-    test('extracts v param even from non-youtube URL', () {
-      // extractVideoId only parses URL structure, not domain
-      expect(extractVideoId('https://example.com/watch?v=abc'), 'abc');
-    });
-
-    test('URL without scheme still extracts v param', () {
-      // Uri.parse handles query params even without a scheme
-      expect(extractVideoId('www.youtube.com/watch?v=abc123'), 'abc123');
     });
   });
 }

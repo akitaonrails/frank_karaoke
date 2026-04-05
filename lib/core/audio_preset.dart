@@ -43,11 +43,3 @@ enum AudioPreset {
   final bool useSpectralSubtraction;
 }
 
-enum AudioEffect {
-  none(label: 'Off'),
-  echo(label: 'Echo'),
-  voiceEnhance(label: 'Voice Enhance');
-
-  const AudioEffect({required this.label});
-  final String label;
-}
