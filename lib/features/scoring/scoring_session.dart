@@ -24,7 +24,7 @@ class ScoringSession {
   final PitchDetector _pitchDetector;
   final VoiceIsolator _voiceIsolator;
   final BandpassFilter _bandpass;
-  final PitchOracle? _oracle;
+  PitchOracle? _oracle;
   final double _noiseGateThreshold;
   final double _singingThreshold;
   final ScoringMode _mode;
@@ -103,6 +103,12 @@ class ScoringSession {
   }
 
   int get streakCount => _streakCount;
+
+  /// Connect an oracle after the session has started (background loading).
+  void setOracle(PitchOracle oracle) {
+    _oracle = oracle;
+    debugPrint('ScoringSession: oracle connected (${oracle.entryCount} entries)');
+  }
 
   /// Feed a reference audio frame (Android: from just_audio PCM tap).
   void feedReferenceFrame(Float64List samples) {
@@ -218,10 +224,11 @@ class ScoringSession {
 
     // Pitch oracle: determine if this is the singer or speaker bleed.
     double singerConf = 1.0; // assume singer unless oracle says otherwise
-    if (_oracle != null && _oracle.isReady && _playbackStartTime != null) {
+    final oracle = _oracle;
+    if (oracle != null && oracle.isReady && _playbackStartTime != null) {
       final elapsed = DateTime.now().difference(_playbackStartTime!);
-      singerConf = _oracle.singerConfidence(pitchHz, elapsed);
-      final refPitch = _oracle.getPitchAt(elapsed);
+      singerConf = oracle.singerConfidence(pitchHz, elapsed);
+      final refPitch = oracle.getPitchAt(elapsed);
 
       // If the oracle says this is speaker bleed, skip it.
       if (singerConf < 0.3) {

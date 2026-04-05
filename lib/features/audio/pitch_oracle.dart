@@ -41,15 +41,35 @@ class PitchOracle {
       debugPrint('PitchOracle: downloading audio for $videoId...');
 
       // Use youtube_explode_dart's authenticated HTTP client to download.
+      // Timeout after 30 seconds to prevent blocking forever.
       final yt = YoutubeExplode();
       final byteList = <int>[];
-      await for (final chunk in yt.videos.streamsClient.get(streamInfo)) {
+      var lastLog = DateTime.now();
+      await for (final chunk in yt.videos.streamsClient.get(streamInfo).timeout(
+        const Duration(seconds: 30),
+        onTimeout: (sink) {
+          debugPrint('PitchOracle: download timeout, using ${byteList.length} bytes');
+          sink.close();
+        },
+      )) {
         byteList.addAll(chunk);
+        // Progress log every 2 seconds.
+        final now = DateTime.now();
+        if (now.difference(lastLog).inSeconds >= 2) {
+          lastLog = now;
+          debugPrint('PitchOracle: downloaded ${byteList.length} bytes...');
+        }
       }
       yt.close();
 
+      if (byteList.isEmpty) {
+        debugPrint('PitchOracle: no data downloaded');
+        _isLoading = false;
+        return false;
+      }
+
       final audioBytes = Uint8List.fromList(byteList);
-      debugPrint('PitchOracle: downloaded ${audioBytes.length} bytes');
+      debugPrint('PitchOracle: downloaded ${audioBytes.length} bytes total');
 
       // Determine format hint from the stream info.
       final codec = streamInfo.codec.mimeType;

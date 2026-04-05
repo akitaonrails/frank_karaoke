@@ -166,31 +166,41 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
       _runJs(YouTubeSyncService.muteVideoJs);
     }
 
-    // Build pitch oracle: download + decode reference audio.
+    // Start scoring immediately — don't wait for oracle.
+    if (mounted) _startScoring();
+
+    // Build pitch oracle in the background while user sings.
+    // Once ready, the scoring session will use it automatically.
+    _buildOracleInBackground(videoId);
+  }
+
+  Future<void> _buildOracleInBackground(String videoId) async {
     try {
+      final audioService = ref.read(youtubeAudioServiceProvider);
       final oracle = ref.read(pitchOracleProvider);
       final streamInfo = await audioService.getAudioStreamInfo(videoId);
-      if (streamInfo != null && mounted) {
-        _runJs('''(function(){var v=document.querySelector('video');if(v)v.pause();})();''');
-        _runJs(WebviewOverlay.processingOverlayJs(true,
-            message: 'Analyzing song...'));
+      if (streamInfo == null) {
+        debugPrint('PitchOracle: no stream info');
+        return;
+      }
 
-        final built = await oracle.buildForVideo(videoId, streamInfo);
-        debugPrint('PitchOracle: ${built ? "ready (${oracle.entryCount} entries)" : "failed"}');
+      _runJs(WebviewOverlay.processingOverlayJs(true,
+          message: 'Loading song data...'));
 
-        if (mounted) {
-          _runJs(WebviewOverlay.processingOverlayJs(false));
-          _runJs('''(function(){var v=document.querySelector('video');if(v){v.currentTime=0;v.play();}})();''');
+      final built = await oracle.buildForVideo(videoId, streamInfo);
+      debugPrint('PitchOracle: ${built ? "ready (${oracle.entryCount} entries)" : "failed"}');
+
+      if (mounted) {
+        _runJs(WebviewOverlay.processingOverlayJs(false));
+        // If oracle is ready, reconnect the scoring session to use it.
+        if (built && _scoringSession != null) {
+          _scoringSession!.setOracle(oracle);
         }
-      } else {
-        debugPrint('PitchOracle: no stream info available');
       }
     } catch (e) {
       debugPrint('PitchOracle: error: $e');
-      _runJs(WebviewOverlay.processingOverlayJs(false));
+      if (mounted) _runJs(WebviewOverlay.processingOverlayJs(false));
     }
-
-    if (mounted) _startScoring();
   }
 
   // --- Scoring ---
