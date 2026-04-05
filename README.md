@@ -54,6 +54,7 @@ Under the hood, this uses the HTML5 video element's `playbackRate` with `preserv
 3. **Video pauses for setup** — the app briefly pauses playback to initialize the mic, download song data for the pitch oracle, and prepare the scoring overlay
 4. **Sing along** — the video plays and your score updates in real-time based on your microphone input
 5. **See your results** — the live score reflects your current performance, while the overall score tracks the entire song
+6. **Play the same song again** — the pitch oracle data is cached locally, so repeat plays start instantly with no download
 
 The app injects an HTML/CSS overlay directly into the YouTube page via JavaScript — the scoring display, pitch trail, settings panel, and mode selector are all rendered inside the webview.
 
@@ -66,7 +67,7 @@ Traditional karaoke machines (SingStar, Joysound, DAM) ship with **pre-made melo
 This means:
 
 - **Without the pitch oracle** (when the reference audio download fails or times out), the app can only judge *how* you sing (pitch stability, melodic movement, interval quality), not *what* you should be singing. It can't tell if you're singing the right melody for this specific song.
-- **With the pitch oracle** (when the reference audio downloads successfully), the app compares your voice against the video's audio to distinguish your singing from speaker bleed. This is better but still imprecise — the phone mic picks up both your voice and the speakers, and the reference audio is the full instrumental mix, not just the melody line.
+- **With the pitch oracle** (when the reference audio downloads successfully), the app knows what the music sounds like at every moment. It compares your voice's pitch against the reference to distinguish your singing from speaker bleed — if the mic detects the same pitch as the music, it's the speaker, not you. The first play of a song takes a few seconds to analyze; after that, the data is cached locally and loads instantly on repeat plays.
 - **The phone mic challenge**: On Android with the built-in mic, the microphone captures your voice *plus* the music playing from the speaker. The app uses a 200-3500 Hz bandpass filter to emphasize vocal frequencies and reduce instrumental bleed, but separation isn't perfect.
 
 For detailed technical background, see [docs/scoring.md](docs/scoring.md).

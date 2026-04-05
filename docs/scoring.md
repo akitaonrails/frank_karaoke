@@ -118,19 +118,23 @@ Video play/pause/seek events are detected via JavaScript event listeners injecte
 
 This doesn't perfectly isolate the voice, but it significantly improves the voice-to-music ratio for pitch detection.
 
-### What We Plan (Pitch Oracle)
+### Pitch Oracle (Implemented)
 
-Instead of subtracting the reference signal, use it as a **pitch oracle** — it tells us what the music is playing, so we can distinguish singer from speaker bleed:
+Instead of subtracting the reference signal, the app uses a **pitch oracle** — it knows what the music is playing at every moment, so it can distinguish singer from speaker bleed:
 
-- Download reference audio via `youtube_explode_dart`'s authenticated stream client
-- Decode to PCM via `audio_decoder` (Android MediaCodec)
-- Build a pitch timeline for the entire song
-- During scoring: if mic pitch matches reference pitch → speaker bleed → ignore
-- If mic pitch differs from reference → singer's voice → score it
+1. Download reference audio via `youtube_explode_dart`'s authenticated stream client
+2. Decode to PCM via `audio_decoder` (Android MediaCodec)
+3. Run YIN pitch detection to build a timestamped pitch timeline
+4. Cache the timeline as JSON by video ID — subsequent plays load instantly
+5. During scoring: compare mic pitch class vs reference pitch class (octave-agnostic)
+6. If mic pitch matches reference → speaker bleed → ignore (`singerConfidence < 0.3`)
+7. If mic pitch differs → singer's voice → score it
 
-This approach is robust to reverb, EQ, delay, and ambient noise because it compares pitch values, not waveform shapes.
+**Time sync**: The video element's `currentTime` is sent to Dart via a `timeupdate` JS event listener (~250ms updates). The oracle looks up the reference pitch at the exact playback position, correctly handling pause, seek, and speed changes.
 
-**Current status**: Implemented but YouTube rate-limits the API calls during heavy testing. Works when rate limit clears.
+**Caching**: Pitch timelines are saved as JSON in the app's cache directory (`pitch_oracle/<videoId>.json`). First play of a song takes 5-15 seconds to download and analyze. Same song again loads from cache instantly with no network request, eliminating YouTube rate limiting for repeated songs.
+
+**Rate limiting**: YouTube may temporarily block `youtube_explode_dart` API calls after many requests from the same IP. When this happens, the oracle fails gracefully — scoring continues in voice-only mode. The rate limit typically clears after 15-30 minutes.
 
 ---
 
@@ -248,10 +252,9 @@ The YIN algorithm's CMNDF minimum value directly measures how periodic (tonal) t
 
 ### Option B: Pitch Oracle Enhancement
 
-Current pitch oracle downloads the full audio and builds a pitch timeline. Future improvements:
-- Cache decoded pitch timelines by video ID (avoid re-downloading)
-- Cross-correlation for automatic speaker delay estimation
-- Use reference pitch for reference-based scoring modes (already implemented, needs oracle to load successfully)
+The pitch oracle is implemented with caching and video time sync. Remaining improvements:
+- Cross-correlation for automatic speaker delay estimation (Bluetooth, room acoustics)
+- Smarter bleed detection using energy envelope, not just pitch class matching
 
 ### Option C: ML-Based Source Separation
 
