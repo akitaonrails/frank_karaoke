@@ -33,6 +33,9 @@ class MicCaptureService {
           autoGain: false,
           echoCancel: false,
           noiseSuppress: false,
+          // Keep recording even when other audio sources play.
+          // Default 'pause' stops the mic when the webview video starts.
+          audioInterruption: AudioInterruptionMode.none,
         ),
       );
 

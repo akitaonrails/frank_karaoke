@@ -175,7 +175,7 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
         _runJs(WebviewOverlay.processingOverlayJs(true,
             message: 'Analyzing song...'));
 
-        final built = await oracle.buildForVideo(videoId, streamInfo.url.toString());
+        final built = await oracle.buildForVideo(videoId, streamInfo);
         debugPrint('PitchOracle: ${built ? "ready (${oracle.entryCount} entries)" : "failed"}');
 
         if (mounted) {

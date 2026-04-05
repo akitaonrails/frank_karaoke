@@ -25,7 +25,6 @@ dependencies:
   just_audio: ^0.9.43
   record: ^6.0.0
   audio_decoder: ^0.7.4
-  http: ^1.2.0
 
   # Persistence
   drift: ^2.24.0

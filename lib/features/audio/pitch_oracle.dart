@@ -2,18 +2,19 @@ import 'dart:math' as math;
 
 import 'package:audio_decoder/audio_decoder.dart';
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
+import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 import '../../core/constants.dart';
 import 'pitch_detector.dart';
 
 /// Pitch oracle: knows what pitch the music is playing at any moment.
 ///
-/// Downloads the reference audio, decodes to PCM via Android MediaCodec,
-/// runs YIN pitch detection, and builds a timeline of pitches.
+/// Downloads the reference audio via youtube_explode_dart's authenticated
+/// stream client, decodes to PCM via audio_decoder (Android MediaCodec),
+/// and builds a pitch timeline for the entire song.
 ///
-/// Used by the scoring system to distinguish singer from speaker bleed:
-/// - mic pitch ≠ reference pitch → singer is singing → score it
+/// Used to distinguish singer from speaker bleed:
+/// - mic pitch ≠ reference pitch → singer → score it
 /// - mic pitch ≈ reference pitch → speaker bleed → ignore
 class PitchOracle {
   final List<_PitchEntry> _timeline = [];
@@ -26,7 +27,8 @@ class PitchOracle {
   int get entryCount => _timeline.length;
 
   /// Build the pitch timeline for a video.
-  Future<bool> buildForVideo(String videoId, String audioUrl) async {
+  /// Uses youtube_explode_dart's stream client for authenticated download.
+  Future<bool> buildForVideo(String videoId, AudioStreamInfo streamInfo) async {
     if (_videoId == videoId && _isReady) return true;
     if (_isLoading) return false;
 
@@ -36,38 +38,44 @@ class PitchOracle {
     _videoId = videoId;
 
     try {
-      debugPrint('PitchOracle: downloading audio...');
+      debugPrint('PitchOracle: downloading audio for $videoId...');
 
-      // Download audio bytes.
-      final response = await http.get(
-        Uri.parse(audioUrl),
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Linux; Android 14) '
-              'AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36',
-        },
-      );
-
-      if (response.statusCode != 200) {
-        debugPrint('PitchOracle: download failed (${response.statusCode})');
-        _isLoading = false;
-        return false;
+      // Use youtube_explode_dart's authenticated HTTP client to download.
+      final yt = YoutubeExplode();
+      final byteList = <int>[];
+      await for (final chunk in yt.videos.streamsClient.get(streamInfo)) {
+        byteList.addAll(chunk);
       }
+      yt.close();
 
-      debugPrint('PitchOracle: downloaded ${response.bodyBytes.length} bytes, decoding...');
+      final audioBytes = Uint8List.fromList(byteList);
+      debugPrint('PitchOracle: downloaded ${audioBytes.length} bytes');
+
+      // Determine format hint from the stream info.
+      final codec = streamInfo.codec.mimeType;
+      String formatHint;
+      if (codec.contains('opus') || codec.contains('webm')) {
+        formatHint = 'webm';
+      } else if (codec.contains('mp4') || codec.contains('m4a') || codec.contains('aac')) {
+        formatHint = 'm4a';
+      } else {
+        formatHint = 'mp4'; // fallback
+      }
+      debugPrint('PitchOracle: decoding ($formatHint, $codec)...');
 
       // Decode to raw 16-bit mono PCM using audio_decoder (MediaCodec).
       final pcmBytes = await AudioDecoder.convertToWavBytes(
-        response.bodyBytes,
-        formatHint: 'm4a',
+        audioBytes,
+        formatHint: formatHint,
         sampleRate: kSampleRate,
         channels: 1,
         bitDepth: 16,
-        includeHeader: false, // raw PCM, no WAV header
+        includeHeader: false,
       );
 
-      debugPrint('PitchOracle: decoded ${pcmBytes.length} bytes of PCM');
+      debugPrint('PitchOracle: decoded ${pcmBytes.length} PCM bytes');
 
-      // Convert 16-bit signed PCM to Float64.
+      // Convert to Float64.
       final numSamples = pcmBytes.length ~/ 2;
       final samples = Float64List(numSamples);
       final byteData = ByteData.sublistView(pcmBytes);
@@ -75,13 +83,13 @@ class PitchOracle {
         samples[i] = byteData.getInt16(i * 2, Endian.little) / 32768.0;
       }
 
-      // Build pitch timeline.
+      // Build pitch timeline with standard threshold (0.15) for clean audio.
       _buildTimeline(samples, kSampleRate);
 
       _isReady = true;
       _isLoading = false;
       debugPrint('PitchOracle: ready, ${_timeline.length} entries, '
-          '${(numSamples / kSampleRate).toStringAsFixed(1)}s of audio');
+          '${(numSamples / kSampleRate).toStringAsFixed(1)}s');
       return true;
     } catch (e) {
       debugPrint('PitchOracle: failed: $e');
@@ -111,15 +119,13 @@ class PitchOracle {
     return _timeline[lo].pitchHz;
   }
 
-  /// How confident are we that the mic pitch is the SINGER, not speaker bleed?
-  /// Returns 0.0 (speaker bleed) to 1.0 (definitely singer).
+  /// Singer confidence: 0.0 (speaker bleed) to 1.0 (singer).
   double singerConfidence(double micPitchHz, Duration timestamp) {
     if (!_isReady) return 0.5;
 
     final refPitch = getPitchAt(timestamp);
-    if (refPitch <= 0) return 1.0; // silence in music = definitely singer
+    if (refPitch <= 0) return 1.0; // music is silent = definitely singer
 
-    // Octave-agnostic pitch class distance.
     final micMidi = 69 + 12 * _log2(micPitchHz / 440);
     final refMidi = 69 + 12 * _log2(refPitch / 440);
     final micClass = micMidi % 12;
@@ -127,13 +133,12 @@ class PitchOracle {
     var dist = (micClass - refClass).abs();
     if (dist > 6) dist = 12 - dist;
 
-    // dist 0 = same note = speaker bleed
-    // dist 2+ = different note = singer
     return (dist / 2.0).clamp(0.0, 1.0);
   }
 
   void _buildTimeline(Float64List samples, int sampleRate) {
-    final detector = PitchDetector(sampleRate: sampleRate);
+    // Use strict threshold (0.15) for clean reference audio.
+    final detector = PitchDetector(sampleRate: sampleRate, threshold: 0.15);
     final frameSize = kFrameSize;
     final hopSize = frameSize ~/ 2;
 
