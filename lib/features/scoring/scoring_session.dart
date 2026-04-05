@@ -314,10 +314,20 @@ class ScoringSession {
   /// Pitch Class: compare pitch classes (C, D, E...) ignoring octave.
   double _scorePitchClass(double singerMidi, double refMidi) {
     if (!_hasReference || refMidi <= 0) {
-      // Fallback: chromatic snap
+      // No reference: use chromatic snap (how clean is the note?)
+      // plus pitch variety (are you moving around, not monotone?).
       final deviation = (singerMidi - singerMidi.roundToDouble()).abs() * 100;
-      final norm = (deviation / 50.0).clamp(0.0, 1.0);
-      return 1.0 - (norm * norm);
+      final snap = 1.0 - ((deviation / 50.0).clamp(0.0, 1.0));
+      // Penalize monotone singing: if pitch hasn't changed much, reduce score.
+      double variety = 0.5;
+      if (_recentPitches.length >= 5) {
+        final pitchRange = _recentPitches.reduce(math.max) -
+            _recentPitches.reduce(math.min);
+        // Singing the same note = range 0 = variety 0.3
+        // Moving 4+ semitones = variety 1.0
+        variety = (0.3 + pitchRange / 6.0).clamp(0.3, 1.0);
+      }
+      return snap * 0.6 + variety * 0.4;
     }
     final singerClass = singerMidi % 12;
     final refClass = refMidi % 12;
@@ -327,7 +337,6 @@ class ScoringSession {
   }
 
   /// Contour: correlate the pitch movement direction over a window.
-  /// If the reference goes up, did you go up too?
   double _scoreContour(double singerMidi, double refMidi) {
     if (_prevSingerMidi > 0) {
       _singerContour.add(singerMidi - _prevSingerMidi);
@@ -338,10 +347,20 @@ class ScoringSession {
       if (_refContour.length > _contourWindowSize) _refContour.removeAt(0);
     }
 
-    if (_singerContour.length < 3 || _refContour.length < 3) return 0.5;
-    if (!_hasReference || refMidi <= 0) return 0.5;
+    // No reference: score based on melodic movement (not monotone).
+    if (!_hasReference || refMidi <= 0) {
+      if (_singerContour.length < 3) return 0.5;
+      // Reward varied movement — count direction changes.
+      int changes = 0;
+      for (var i = 1; i < _singerContour.length; i++) {
+        if (_singerContour[i] * _singerContour[i - 1] < 0) changes++;
+      }
+      // More direction changes = more melodic = higher score.
+      return (0.3 + changes / (_singerContour.length * 0.6)).clamp(0.3, 1.0);
+    }
 
-    // Normalized cross-correlation of the two contour vectors.
+    if (_singerContour.length < 3 || _refContour.length < 3) return 0.5;
+
     final n = math.min(_singerContour.length, _refContour.length);
     double dotProduct = 0, normA = 0, normB = 0;
     for (var i = 0; i < n; i++) {
@@ -351,23 +370,35 @@ class ScoringSession {
       normA += a * a;
       normB += b * b;
     }
-    if (normA < 0.001 || normB < 0.001) return 0.5;
-    // Correlation: -1 (opposite) to +1 (perfect match). Map to 0-1.
+    // If either signal is flat (sustained note), use simple direction match
+    // instead of correlation to avoid the 0.5 trap.
+    if (normA < 0.001 || normB < 0.001) {
+      // Both flat = both sustained = good match.
+      if (normA < 0.001 && normB < 0.001) return 0.85;
+      // One flat, one moving = partial match.
+      return 0.4;
+    }
     final correlation = dotProduct / (math.sqrt(normA) * math.sqrt(normB));
     return ((correlation + 1) / 2).clamp(0.0, 1.0);
   }
 
   /// Interval: compare the pitch JUMP between consecutive frames.
-  /// If the reference jumped +3 semitones, did you jump ~+3 too?
   double _scoreInterval(double singerMidi, double refMidi) {
-    if (_prevSingerPitch <= 0 || !_hasReference || _prevRefPitch <= 0 || refMidi <= 0) {
-      return 0.5; // not enough data yet
-    }
+    if (_prevSingerPitch <= 0) return 0.7; // first note, be generous
 
     final singerInterval = singerMidi - hzToMidi(_prevSingerPitch);
-    final refInterval = refMidi - _prevRefMidi;
 
-    // How close are the intervals? Within 1 semitone = good.
+    if (!_hasReference || _prevRefPitch <= 0 || refMidi <= 0) {
+      // No reference: reward small, musical intervals (1-5 semitones).
+      // Large jumps (>7) or static (0) score lower.
+      final absInterval = singerInterval.abs();
+      if (absInterval < 0.5) return 0.5; // monotone
+      if (absInterval <= 5) return 0.9;  // musical interval
+      if (absInterval <= 7) return 0.6;  // large but possible
+      return 0.3;                         // wild jump
+    }
+
+    final refInterval = refMidi - _prevRefMidi;
     final intervalDiff = (singerInterval - refInterval).abs();
     return (1.0 - intervalDiff / 4.0).clamp(0.0, 1.0);
   }
