@@ -139,6 +139,7 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
   void _onScoreUpdate(ScoringUpdate update) {
     if (!_created || !_overlayInjected) return;
 
+    // Update score number.
     if (update.totalScore != _lastInjectedScore) {
       _lastInjectedScore = update.totalScore;
       _controller.evaluateJavascript(
@@ -147,13 +148,22 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       ref.read(currentScoreProvider.notifier).state = update.totalScore;
     }
 
-    if (update.singerPitchHz > 0) {
-      final normalized =
-          ((update.singerPitchHz - 80) / 720).clamp(0.0, 1.0);
-      _controller.evaluateJavascript(
-        source: WebviewOverlay.updatePitchJs(normalized),
-      );
-    }
+    // Update pitch trail visualization.
+    final normalizedPitch = update.singerPitchHz > 0
+        ? ((update.singerPitchHz - 80) / 720).clamp(0.0, 1.0)
+        : 0.0;
+    _controller.evaluateJavascript(
+      source: WebviewOverlay.updatePitchTrailJs(
+        normalizedPitch,
+        update.frameScore,
+      ),
+    );
+
+    // Update mic activity bar.
+    final normalizedRms = (update.rmsEnergy * 5).clamp(0.0, 1.0);
+    _controller.evaluateJavascript(
+      source: WebviewOverlay.updateRmsJs(normalizedRms),
+    );
   }
 
   Future<void> _stopScoring() async {
