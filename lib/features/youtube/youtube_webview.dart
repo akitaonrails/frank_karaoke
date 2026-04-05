@@ -153,7 +153,7 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
         + '.ytd-banner-promo-renderer{display:none!important}'
         + 'tp-yt-paper-dialog{display:none!important}'
         + '.yt-mealbar-promo-renderer{display:none!important}'
-        + '[class*="open-app"]{display:none!important}'
+        + '.open-app-button{display:none!important}'
         + '.smartimation-background{display:none!important}'
         + '.mobile-topbar-header-content .topbar-menu-button-avatar-button{display:none!important}'
         + '.ytm-autonav-bar{display:none!important}'
@@ -168,9 +168,8 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
     (function() {
       function removeAppButtons() {
         document.querySelectorAll(
-          '[aria-label*="app" i], [aria-label*="App"], '
-          + '.open-app-button, .ytm-app-promotion-banner, '
-          + 'a[href*="intent"], .companion-ad-container, '
+          '.open-app-button, .ytm-app-promotion-banner, '
+          + 'a[href*="intent://"], .companion-ad-container, '
           + '.ytp-paid-content-overlay'
         ).forEach(function(el) { el.style.display = "none"; });
       }
