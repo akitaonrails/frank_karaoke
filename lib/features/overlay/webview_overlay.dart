@@ -4,19 +4,21 @@
 /// Trusted Types Content Security Policy.
 class WebviewOverlay {
   /// Shared JS helper that creates a hoverable round button.
-  /// Injected once, reused by both the settings-only and full overlays.
+  /// Buttons are placed on the LEFT side to avoid YouTube's top-right controls.
+  /// Click events are stopped from propagating to YouTube elements underneath.
   static const _buttonHelperJs = '''
     if (!window._fkBtn) {
       window._fkBtn = function(id, icon, top, hoverColor, handler) {
         var btn = document.createElement('div');
         btn.id = id;
         btn.textContent = icon;
-        btn.style.cssText = 'position:fixed;top:' + top + 'px;right:14px;z-index:100000;'
+        btn.style.cssText = 'position:fixed;top:' + top + 'px;left:14px;z-index:100000;'
           + 'width:40px;height:40px;border-radius:50%;'
-          + 'background:rgba(0,0,0,0.7);color:rgba(255,255,255,0.6);'
+          + 'background:rgba(0,0,0,0.8);color:rgba(255,255,255,0.6);'
           + 'font-size:22px;display:flex;align-items:center;justify-content:center;'
           + 'cursor:pointer;pointer-events:auto;'
-          + 'border:1px solid rgba(255,255,255,0.15);transition:all 0.2s ease;';
+          + 'border:1px solid rgba(255,255,255,0.2);transition:all 0.2s ease;'
+          + 'user-select:none;-webkit-user-select:none;';
         btn.addEventListener('mouseenter', function() {
           btn.style.color = hoverColor;
           btn.style.borderColor = hoverColor.replace(')', ',0.5)').replace('rgb', 'rgba');
@@ -24,21 +26,26 @@ class WebviewOverlay {
         });
         btn.addEventListener('mouseleave', function() {
           btn.style.color = 'rgba(255,255,255,0.6)';
-          btn.style.borderColor = 'rgba(255,255,255,0.15)';
+          btn.style.borderColor = 'rgba(255,255,255,0.2)';
           btn.style.boxShadow = 'none';
         });
-        btn.addEventListener('click', function() {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          e.preventDefault();
           if (window.webkit && window.webkit.messageHandlers &&
               window.webkit.messageHandlers[handler]) {
             window.webkit.messageHandlers[handler].postMessage('click');
           }
-        });
+        }, true);
+        btn.addEventListener('mousedown', function(e) {
+          e.stopPropagation();
+        }, true);
         return btn;
       };
     }
   ''';
 
-  /// Inject a minimal overlay with just the settings gear (for non-video pages).
+  /// Settings gear only (for non-video pages like YouTube homepage).
   static const injectSettingsOnlyJs = '''
     (function() {
       if (document.getElementById('fk-settings-btn')) return;
@@ -54,7 +61,6 @@ class WebviewOverlay {
     (function() {
       var existing = document.getElementById('fk-overlay');
       if (existing) existing.remove();
-      // Also remove standalone settings gear if present.
       var standaloneGear = document.getElementById('fk-settings-btn');
       if (standaloneGear && !standaloneGear.closest('#fk-overlay')) standaloneGear.remove();
 
@@ -63,23 +69,23 @@ class WebviewOverlay {
       var overlay = document.createElement('div');
       overlay.id = 'fk-overlay';
 
-      // Song title (top left)
+      // Song title (top center-left, away from YouTube controls)
       var singer = document.createElement('div');
       singer.id = 'fk-singer';
       singer.textContent = '$singerName';
-      singer.style.cssText = 'position:fixed;top:14px;left:14px;z-index:99999;'
+      singer.style.cssText = 'position:fixed;top:14px;left:60px;z-index:99999;'
         + 'background:linear-gradient(135deg,rgba(108,92,231,0.85),rgba(0,0,0,0.7));'
         + 'color:#fff;padding:10px 18px;border-radius:24px;'
         + 'font-family:system-ui,sans-serif;font-size:14px;font-weight:600;'
-        + 'pointer-events:none;max-width:45%;'
+        + 'pointer-events:none;max-width:40%;'
         + 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
         + 'box-shadow:0 2px 20px rgba(108,92,231,0.4);';
       overlay.appendChild(singer);
 
-      // Current note + mic indicator (top right)
+      // Current note + mic indicator (top right, but below YouTube bar)
       var noteBox = document.createElement('div');
       noteBox.id = 'fk-note-box';
-      noteBox.style.cssText = 'position:fixed;top:14px;right:14px;z-index:99999;'
+      noteBox.style.cssText = 'position:fixed;top:56px;right:14px;z-index:99999;'
         + 'background:rgba(0,0,0,0.75);padding:8px 16px;border-radius:16px;'
         + 'font-family:system-ui,sans-serif;pointer-events:none;display:flex;'
         + 'align-items:center;gap:10px;border:1px solid rgba(0,210,255,0.3);';
@@ -99,9 +105,9 @@ class WebviewOverlay {
 
       overlay.appendChild(noteBox);
 
-      // Action buttons (right side, below note box)
-      overlay.appendChild(window._fkBtn('fk-settings-btn', '\\u2699', 58, 'rgb(0,210,255)', 'FrankSettings'));
-      overlay.appendChild(window._fkBtn('fk-restart-btn', '\\u21BB', 104, 'rgb(255,159,67)', 'FrankRestart'));
+      // Action buttons (left side, below logo area)
+      overlay.appendChild(window._fkBtn('fk-settings-btn', '\\u2699', 14, 'rgb(0,210,255)', 'FrankSettings'));
+      overlay.appendChild(window._fkBtn('fk-restart-btn', '\\u21BB', 60, 'rgb(255,159,67)', 'FrankRestart'));
 
       // Score display (bottom right)
       var scoreBox = document.createElement('div');
@@ -134,7 +140,7 @@ class WebviewOverlay {
 
       overlay.appendChild(scoreBox);
 
-      // Dual-track pitch canvas (bottom left)
+      // Pitch canvas (bottom left)
       var pitchCanvas = document.createElement('canvas');
       pitchCanvas.id = 'fk-pitch-canvas';
       pitchCanvas.width = 480;
@@ -148,65 +154,8 @@ class WebviewOverlay {
 
       document.body.appendChild(overlay);
 
-      // State
       window._fkTrail = [];
-      window._fkRefTrail = [];
       window._fkTrailMax = 480;
-
-      // Web Audio API: analyze the video element's audio for reference pitch.
-      window._fkAudioCtx = null;
-      window._fkAnalyser = null;
-      window._fkRefPitch = 0;
-
-      function setupAudioAnalyser() {
-        var video = document.querySelector('video');
-        if (!video) { setTimeout(setupAudioAnalyser, 1000); return; }
-        if (window._fkAudioCtx) return;
-        try {
-          var ctx = new (window.AudioContext || window.webkitAudioContext)();
-          var source = ctx.createMediaElementSource(video);
-          var analyser = ctx.createAnalyser();
-          analyser.fftSize = 2048;
-          source.connect(analyser);
-          analyser.connect(ctx.destination);
-          window._fkAudioCtx = ctx;
-          window._fkAnalyser = analyser;
-          window._fkBuf = new Float32Array(analyser.fftSize);
-          function detectRefPitch() {
-            if (!window._fkAnalyser) return;
-            window._fkAnalyser.getFloatTimeDomainData(window._fkBuf);
-            window._fkRefPitch = yinPitch(window._fkBuf, ctx.sampleRate);
-            requestAnimationFrame(detectRefPitch);
-          }
-          detectRefPitch();
-        } catch(e) {}
-      }
-
-      function yinPitch(buf, sr) {
-        var size = buf.length, half = Math.floor(size / 2);
-        var diff = new Float32Array(half);
-        for (var tau = 0; tau < half; tau++) {
-          var sum = 0;
-          for (var i = 0; i < half; i++) { var d = buf[i] - buf[i+tau]; sum += d*d; }
-          diff[tau] = sum;
-        }
-        var cmndf = new Float32Array(half);
-        cmndf[0] = 1; var running = 0;
-        for (var tau = 1; tau < half; tau++) {
-          running += diff[tau];
-          cmndf[tau] = diff[tau] * tau / running;
-        }
-        var minTau = Math.floor(sr / 900);
-        for (var tau = minTau; tau < half; tau++) {
-          if (cmndf[tau] < 0.15) {
-            while (tau+1 < half && cmndf[tau+1] < cmndf[tau]) tau++;
-            return sr / tau;
-          }
-        }
-        return 0;
-      }
-
-      setupAudioAnalyser();
     })();
   ''';
 
@@ -236,6 +185,8 @@ class WebviewOverlay {
     ''';
   }
 
+  /// Voice pitch trail with note guide lines. No reference track
+  /// (YouTube blocks Web Audio API via CORS on cross-origin video).
   static String updatePitchTrailJs(double normalizedVoicePitch, double quality) {
     final vp = normalizedVoicePitch.clamp(0.0, 1.0).toStringAsFixed(3);
     final q = quality.clamp(0.0, 1.0).toStringAsFixed(3);
@@ -243,17 +194,14 @@ class WebviewOverlay {
       (function() {
         var canvas = document.getElementById('fk-pitch-canvas');
         if (!canvas || !window._fkTrail) return;
-        var refHz = window._fkRefPitch || 0;
-        var refNorm = refHz > 80 ? Math.min(Math.max((refHz-80)/720,0),1) : 0;
         window._fkTrail.push({p:$vp, q:$q});
-        window._fkRefTrail.push(refNorm);
-        if (window._fkTrail.length > window._fkTrailMax) {
-          window._fkTrail.shift(); window._fkRefTrail.shift();
-        }
-        var trail=window._fkTrail, refTrail=window._fkRefTrail;
+        if (window._fkTrail.length > window._fkTrailMax) window._fkTrail.shift();
+
+        var trail=window._fkTrail;
         var ctx=canvas.getContext('2d'), w=canvas.width, h=canvas.height, pad=6;
         ctx.clearRect(0,0,w,h);
-        // Note grid
+
+        // Note grid lines
         var nf=[130.81,261.63,523.25,1046.50], nn=['C3','C4','C5','C6'];
         ctx.font='9px system-ui';
         for(var n=0;n<nf.length;n++){
@@ -261,23 +209,11 @@ class WebviewOverlay {
           var y=h-(ny*(h-2*pad))-pad;
           ctx.strokeStyle='rgba(255,255,255,0.06)'; ctx.lineWidth=1;
           ctx.beginPath();ctx.moveTo(24,y);ctx.lineTo(w,y);ctx.stroke();
-          ctx.fillStyle='rgba(255,255,255,0.15)';ctx.fillText(nn[n],2,y+3);
+          ctx.fillStyle='rgba(255,255,255,0.2)';ctx.fillText(nn[n],2,y+3);
         }
-        var sx=w-trail.length;
-        // Reference trail (purple, wider)
-        ctx.globalAlpha=0.4;var prx=-1,pry=-1;
-        for(var i=0;i<refTrail.length;i++){
-          var rp=refTrail[i]; if(rp<=0){prx=-1;continue;}
-          var x=sx+i, y=h-(rp*(h-2*pad))-pad;
-          if(prx>=0&&Math.abs(pry-y)<h*0.4){
-            ctx.strokeStyle='rgba(108,92,231,0.7)';ctx.lineWidth=4;
-            ctx.beginPath();ctx.moveTo(prx,pry);ctx.lineTo(x,y);ctx.stroke();
-          }
-          prx=x;pry=y;
-        }
-        ctx.globalAlpha=1.0;
-        // Voice trail (colored dots with glow)
-        var pvx=-1,pvy=-1;
+
+        // Voice trail
+        var sx=w-trail.length, pvx=-1,pvy=-1;
         for(var i=0;i<trail.length;i++){
           var pt=trail[i]; if(pt.p<=0){pvx=-1;continue;}
           var x=sx+i, y=h-(pt.p*(h-2*pad))-pad;
@@ -293,12 +229,6 @@ class WebviewOverlay {
           ctx.arc(x,y,pt.q>0.5?3.5:2,0,6.283);ctx.fill();ctx.shadowBlur=0;
           pvx=x;pvy=y;
         }
-        // Legend
-        ctx.globalAlpha=0.5;
-        ctx.fillStyle='#6c5ce7';ctx.fillRect(w-90,h-14,12,3);
-        ctx.fillStyle='#fff';ctx.font='8px system-ui';ctx.fillText('Song',w-74,h-11);
-        ctx.fillStyle='#00ff88';ctx.fillRect(w-45,h-14,12,3);ctx.fillText('You',w-29,h-11);
-        ctx.globalAlpha=1.0;
       })();
     ''';
   }
@@ -389,10 +319,7 @@ class WebviewOverlay {
     (function() {
       var el=document.getElementById('fk-overlay');if(el)el.remove();
       var gear=document.getElementById('fk-settings-btn');if(gear)gear.remove();
-      if(window._fkAudioCtx){try{window._fkAudioCtx.close();}catch(e){}}
-      delete window._fkTrail;delete window._fkRefTrail;delete window._fkTrailMax;
-      delete window._fkAudioCtx;delete window._fkAnalyser;delete window._fkBuf;
-      delete window._fkRefPitch;delete window._fkBtn;
+      delete window._fkTrail;delete window._fkTrailMax;delete window._fkBtn;
     })();
   ''';
 }
