@@ -333,22 +333,19 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       );
     }
 
-    // Start reference audio analysis (ffmpeg decode + pitch detection).
-    final streamInfo = await audioService.getAudioStreamInfo(videoId);
-    String? refAudioUrl;
-    if (streamInfo != null) {
-      refAudioUrl = streamInfo.url.toString();
-    }
-
-    _startScoring(refAudioUrl: refAudioUrl);
+    // On Linux, don't use reference audio — ffmpeg decodes from the start
+    // of the file but the video may be playing from any position, so the
+    // reference pitch would be from a different part of the song.
+    // Reference comparison only works on Android where just_audio gives
+    // us synchronized PCM playback.
+    _startScoring();
   }
 
-  Future<void> _startScoring({String? refAudioUrl}) async {
+  Future<void> _startScoring() async {
     await _stopScoring();
 
     final mic = ref.read(micCaptureServiceProvider);
     final preset = ref.read(audioPresetProvider);
-
     final mode = ref.read(scoringModeProvider);
     final calGate = ref.read(calibratedNoiseGateProvider);
     final calSinging = ref.read(calibratedSingingThresholdProvider);
@@ -359,20 +356,6 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       calibratedNoiseGate: calGate,
       calibratedSingingThreshold: calSinging,
     );
-
-    // Start reference audio analyzer if we have a URL.
-    if (refAudioUrl != null) {
-      _refAnalyzer = ReferenceAudioAnalyzer();
-      final refStarted = await _refAnalyzer!.start(refAudioUrl);
-      if (refStarted) {
-        _scoringSession!.connectReferenceAnalyzer(_refAnalyzer!);
-        debugPrint('Scoring: reference audio analyzer connected');
-      } else {
-        debugPrint('Scoring: reference analyzer failed, using fallback');
-        await _refAnalyzer!.dispose();
-        _refAnalyzer = null;
-      }
-    }
 
     final started = await _scoringSession!.start();
     if (!started) {
@@ -496,19 +479,8 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       ''',
     );
 
-    // Re-fetch audio URL for reference analyzer.
-    final videoId = ref.read(currentVideoIdProvider);
-    String? refAudioUrl;
-    if (videoId != null) {
-      final audioService = ref.read(youtubeAudioServiceProvider);
-      final streamInfo = await audioService.getAudioStreamInfo(videoId);
-      if (streamInfo != null) {
-        refAudioUrl = streamInfo.url.toString();
-      }
-    }
-
     await _stopScoring();
-    _startScoring(refAudioUrl: refAudioUrl);
+    _startScoring();
   }
 
   Future<void> _stopScoring() async {
