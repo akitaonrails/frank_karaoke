@@ -72,3 +72,4 @@ flutter build apk --debug    # build debug APK for sideloading
 - **YIN threshold 0.70**: Relaxed from the standard 0.15 because the phone mic captures mixed voice+music. Higher threshold accepts less confident pitch detections.
 - **5-second warmup**: Scoring waits 5 seconds after playback starts to avoid scoring initial clicks and noise.
 - **Playback sync via JS bridge**: Video play/pause/seek events are detected via JavaScript event listeners and synced to the scoring session.
+- **Pitch shift via playbackRate**: Uses `video.playbackRate` with `preservesPitch=false` to shift the YouTube audio pitch. Combined with scoring pitch offset so both audio and scoring adjust together. No external audio library needed.

@@ -41,6 +41,12 @@ Built with Flutter for Android.
 
 *Settings panel: choose a mic preset for your environment (clean external mic, room mic, or noisy party), adjust pitch shift for songs outside your vocal range, restart the song, or calibrate the mic for your room's noise level.*
 
+## Pitch Shift
+
+Songs too high or too low for your voice? Use the pitch shift controls in the settings panel to transpose the music up or down by up to 6 semitones. The YouTube video's audio pitch changes in real-time, and the scoring automatically adjusts to match — so you sing in your comfortable range and still get scored correctly.
+
+Under the hood, this uses the HTML5 video element's `playbackRate` with `preservesPitch=false`. Small pitch changes (±2-3 semitones) have a barely noticeable speed difference (~6% per semitone).
+
 ## How It Works
 
 1. **Open the app** — YouTube loads inside the app with the Frank Karaoke logo
