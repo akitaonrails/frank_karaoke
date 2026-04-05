@@ -201,7 +201,8 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
   }
 
   Future<void> _onVideoDetected(String videoId) async {
-    // Show loading overlay immediately.
+    // Pause video and show loading overlay immediately.
+    _runJs('''(function(){var v=document.querySelector('video');if(v)v.pause();})();''');
     _runJs(WebviewOverlay.processingOverlayJs(true, message: 'Loading...'));
 
     final syncService = ref.read(syncServiceProvider);
@@ -224,8 +225,11 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
 
     final streamInfo = await audioService.getAudioStreamInfo(videoId);
 
-    // Start scoring with a 5-second warmup delay.
-    if (mounted) _startScoring();
+    // Start scoring, then resume video playback.
+    if (mounted) {
+      _startScoring();
+      _runJs('''(function(){var v=document.querySelector('video');if(v){v.currentTime=0;v.play();}})();''');
+    }
 
     // Build pitch oracle in the background.
     if (streamInfo != null) {
