@@ -568,24 +568,41 @@ class WebviewOverlay {
 
   static String updateScoreJs(int liveScore, int overallScore,
       {int streakCount = 0, String modeName = ''}) {
+    final isStreak = modeName == 'Streak';
     String color, glow, feedback;
-    if (streakCount > 20) {
+
+    // Streak-specific messages
+    if (isStreak && streakCount > 30) {
       color = '#ffd700'; glow = '0 0 30px rgba(255,215,0,0.7)';
+      feedback = '\u{1F525} ${streakCount}x ON FIRE!';
+    } else if (isStreak && streakCount > 15) {
+      color = '#ffd700'; glow = '0 0 25px rgba(255,215,0,0.6)';
       feedback = '\u{1F525} ${streakCount}x COMBO!';
-    } else if (streakCount > 10) {
+    } else if (isStreak && streakCount > 5) {
       color = '#ff9f43'; glow = '0 0 20px rgba(255,159,67,0.5)';
       feedback = '\u{1F525} ${streakCount}x streak';
-    } else if (liveScore >= 90) {
-      color = '#ffd700'; glow = '0 0 30px rgba(255,215,0,0.7)'; feedback = 'AMAZING!';
-    } else if (liveScore >= 75) {
-      color = '#00ff88'; glow = '0 0 20px rgba(0,255,136,0.5)'; feedback = 'Great singing!';
-    } else if (liveScore >= 50) {
-      color = '#00d2ff'; glow = '0 0 20px rgba(0,210,255,0.4)'; feedback = 'Keep it up!';
-    } else if (liveScore >= 25) {
-      color = '#ff9f43'; glow = '0 0 15px rgba(255,159,67,0.4)'; feedback = 'Getting there...';
-    } else {
+    } else if (isStreak && streakCount == 0 && liveScore < 15) {
       color = '#ff6b6b'; glow = '0 0 15px rgba(255,107,107,0.3)';
-      feedback = streakCount == 0 && liveScore < 15 ? 'Streak broken!' : '';
+      feedback = 'Streak broken!';
+    // General messages for all modes
+    } else if (liveScore >= 95) {
+      color = '#ffd700'; glow = '0 0 30px rgba(255,215,0,0.7)'; feedback = 'PERFECT!';
+    } else if (liveScore >= 85) {
+      color = '#ffd700'; glow = '0 0 25px rgba(255,215,0,0.6)'; feedback = 'Incredible!';
+    } else if (liveScore >= 75) {
+      color = '#00ff88'; glow = '0 0 20px rgba(0,255,136,0.5)'; feedback = 'Nailing it!';
+    } else if (liveScore >= 65) {
+      color = '#00ff88'; glow = '0 0 18px rgba(0,255,136,0.4)'; feedback = 'Sounding good!';
+    } else if (liveScore >= 50) {
+      color = '#00d2ff'; glow = '0 0 20px rgba(0,210,255,0.4)'; feedback = 'Keep going!';
+    } else if (liveScore >= 35) {
+      color = '#00d2ff'; glow = '0 0 15px rgba(0,210,255,0.3)'; feedback = 'Warming up...';
+    } else if (liveScore >= 20) {
+      color = '#ff9f43'; glow = '0 0 15px rgba(255,159,67,0.4)'; feedback = 'Sing louder!';
+    } else if (liveScore > 5) {
+      color = '#ff6b6b'; glow = '0 0 12px rgba(255,107,107,0.3)'; feedback = 'Find the melody!';
+    } else {
+      color = '#ff6b6b'; glow = '0 0 10px rgba(255,107,107,0.2)'; feedback = '';
     }
     String oColor;
     if (overallScore >= 75) { oColor = 'rgba(0,255,136,0.7)'; }
