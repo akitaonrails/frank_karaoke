@@ -4,6 +4,13 @@ import '../../core/strings.dart';
 /// JavaScript overlay injected into the YouTube webview.
 /// Uses DOM createElement for YouTube's Trusted Types CSP.
 class WebviewOverlay {
+  /// Escape a string for safe inclusion in a JS string literal.
+  /// Prevents XSS from video titles containing quotes, backslashes, etc.
+  static String _esc(String s) => s
+      .replaceAll('\\', '\\\\')
+      .replaceAll("'", "\\'")
+      .replaceAll('\n', '\\n')
+      .replaceAll('\r', '\\r');
   /// Welcome screen shown on first launch.
   static String get welcomeOverlayJs => '''
     (function() {
@@ -261,7 +268,7 @@ class WebviewOverlay {
       // --- Song title (bottom right, below score) ---
       var singer = document.createElement('div');
       singer.id = 'fk-singer';
-      singer.textContent = '$singerName';
+      singer.textContent = '${_esc(singerName)}';
       singer.style.cssText = 'position:fixed;bottom:24px;right:170px;z-index:99999;'
         + 'background:linear-gradient(135deg,rgba(108,92,231,0.85),rgba(0,0,0,0.7));'
         + 'color:#fff;padding:8px 16px;border-radius:20px;'
@@ -496,7 +503,7 @@ class WebviewOverlay {
     (function() {
       var btn = document.getElementById('fk-calibrate-btn');
       if (!btn) return;
-      btn.textContent = '$text';
+      btn.textContent = '${_esc(text)}';
       window._fkCalibrating = $active;
       btn.style.background = $active
         ? 'rgba(0,210,255,0.3)'
@@ -839,7 +846,7 @@ class WebviewOverlay {
   ''';
 
   static String updateSingerJs(String name) => '''
-    (function(){var el=document.getElementById('fk-singer');if(el)el.textContent='$name';})();
+    (function(){var el=document.getElementById('fk-singer');if(el)el.textContent='${_esc(name)}';})();
   ''';
 
   /// Processing overlay — shown while reference audio is being analyzed.
@@ -860,7 +867,7 @@ class WebviewOverlay {
         d.appendChild(spinner);
         var msg = document.createElement('div');
         msg.style.cssText = 'color:rgba(255,255,255,0.7);font-size:15px;margin-top:16px;font-weight:500;';
-        msg.textContent = '$message';
+        msg.textContent = '${_esc(message)}';
         d.appendChild(msg);
         var sub = document.createElement('div');
         sub.style.cssText = 'color:rgba(255,255,255,0.35);font-size:12px;margin-top:6px;';
@@ -878,8 +885,10 @@ class WebviewOverlay {
 
   static const removeOverlayJs = '''
     (function() {
-      var el=document.getElementById('fk-overlay');if(el)el.remove();
-      delete window._fkTrail;delete window._fkTrailMax;
+      ['fk-overlay','fk-celebration','fk-processing','fk-welcome','fk-score-info'].forEach(function(id){
+        var el=document.getElementById(id);if(el)el.remove();
+      });
+      delete window._fkTrail;delete window._fkTrailMax;delete window._fkCalibrating;
     })();
   ''';
 }

@@ -145,9 +145,10 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
         observer.observe(document.body, {childList:true,subtree:true});
 
         // Monitor video play/pause/seek for scoring sync.
-        function watchVideo() {
-          var v = document.querySelector('video');
-          if (!v) { setTimeout(watchVideo, 1000); return; }
+        // Uses MutationObserver to re-attach when YouTube replaces the video element.
+        function guardVideo(v) {
+          if (v._fkBridged) return;
+          v._fkBridged = true;
           v.addEventListener('play', function() {
             FrankKaraoke.postMessage(JSON.stringify({type:'play'}));
           });
@@ -160,7 +161,10 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
             }));
           });
         }
-        watchVideo();
+        document.querySelectorAll('video').forEach(guardVideo);
+        new MutationObserver(function() {
+          document.querySelectorAll('video').forEach(guardVideo);
+        }).observe(document.body || document.documentElement, {childList:true, subtree:true});
       })();
     ''');
   }
@@ -576,7 +580,9 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
   // --- Helpers ---
 
   Future<void> _runJs(String source) {
-    return _controller.runJavaScript(source);
+    return _controller.runJavaScript(source).catchError((e) {
+      debugPrint('runJs error: $e');
+    });
   }
 
   double _logNormalize(double hz, double minHz, double maxHz) {

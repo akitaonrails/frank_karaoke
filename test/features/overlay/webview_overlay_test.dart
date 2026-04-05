@@ -4,6 +4,40 @@ import 'package:frank_karaoke/core/logo_assets.dart';
 
 void main() {
   group('WebviewOverlay', () {
+    group('JS escaping', () {
+      test('handles video titles with single quotes', () {
+        final js = WebviewOverlay.injectOverlayJs(
+          singerName: "Rock n' Roll",
+          activePreset: 'roomMic',
+          pitchShift: 0,
+        );
+        expect(js, contains("Rock n\\' Roll"));
+        expect(js, isNot(contains("Rock n' Roll")));
+      });
+
+      test('handles video titles with backslashes', () {
+        final js = WebviewOverlay.injectOverlayJs(
+          singerName: 'AC\\DC',
+          activePreset: 'roomMic',
+          pitchShift: 0,
+        );
+        expect(js, contains('AC\\\\DC'));
+      });
+
+      test('handles video titles with newlines', () {
+        final js = WebviewOverlay.injectOverlayJs(
+          singerName: 'Line1\nLine2',
+          activePreset: 'roomMic',
+          pitchShift: 0,
+        );
+        expect(js, contains('Line1\\nLine2'));
+      });
+
+      test('updateSingerJs escapes names', () {
+        final js = WebviewOverlay.updateSingerJs("Let's Go");
+        expect(js, contains("Let\\'s Go"));
+      });
+    });
     group('logo replacement', () {
       test('injectOverlayJs creates overlay with required elements', () {
         final js = WebviewOverlay.injectOverlayJs(
