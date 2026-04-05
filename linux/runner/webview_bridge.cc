@@ -11,6 +11,7 @@
 static GtkOverlay* g_overlay = nullptr;
 static WebKitWebView* g_webview = nullptr;
 static GtkWidget* g_webview_widget = nullptr;
+static GtkFixed* g_fixed = nullptr;       // Container for precise positioning
 static FlMethodChannel* g_method_channel = nullptr;
 static FlEventChannel* g_event_channel = nullptr;
 static gboolean g_listening = FALSE;
@@ -22,13 +23,24 @@ static std::map<std::string, gulong> g_handler_signals;
 // Bottom inset in pixels (space reserved for Flutter's bottom nav bar).
 static int g_bottom_inset = 0;
 
-// Callback: re-apply size constraints when the overlay is resized.
+// Resize the webview within the fixed container to fill the available space
+// minus the bottom inset.
+static void apply_webview_layout() {
+  if (g_webview_widget == nullptr || g_overlay == nullptr) return;
+  GtkAllocation alloc;
+  gtk_widget_get_allocation(GTK_WIDGET(g_overlay), &alloc);
+  int h = alloc.height - g_bottom_inset;
+  if (h < 100) h = 100;
+  // Move to (0,0) and size to (width, height - inset).
+  if (g_fixed != nullptr) {
+    gtk_fixed_move(g_fixed, g_webview_widget, 0, 0);
+  }
+  gtk_widget_set_size_request(g_webview_widget, alloc.width, h);
+}
+
 static void on_overlay_size_allocate(GtkWidget* widget, GdkRectangle* allocation,
                                      gpointer user_data) {
-  if (g_webview_widget == nullptr || g_bottom_inset <= 0) return;
-  int target_height = allocation->height - g_bottom_inset;
-  if (target_height < 100) target_height = 100;
-  gtk_widget_set_size_request(g_webview_widget, allocation->width, target_height);
+  apply_webview_layout();
 }
 
 // JS shim to emulate window.flutter_inappwebview.callHandler()
@@ -63,7 +75,6 @@ static void send_event(const char* type, FlValue* data) {
   }
 }
 
-// Signal: page finished loading
 static void on_load_changed(WebKitWebView* web_view, WebKitLoadEvent event,
                             gpointer user_data) {
   if (event == WEBKIT_LOAD_FINISHED) {
@@ -75,7 +86,6 @@ static void on_load_changed(WebKitWebView* web_view, WebKitLoadEvent event,
   }
 }
 
-// Signal: URL changed
 static void on_uri_changed(GObject* object, GParamSpec* pspec,
                            gpointer user_data) {
   WebKitWebView* web_view = WEBKIT_WEB_VIEW(object);
@@ -86,14 +96,12 @@ static void on_uri_changed(GObject* object, GParamSpec* pspec,
   send_event("onUpdateVisitedHistory", data);
 }
 
-// Handle window.open() / target="_blank" — redirect to same webview
 static GtkWidget* on_create(WebKitWebView* web_view,
                              WebKitNavigationAction* navigation_action,
                              gpointer user_data) {
   WebKitURIRequest* request =
       webkit_navigation_action_get_request(navigation_action);
   const gchar* uri = webkit_uri_request_get_uri(request);
-
   if (uri != nullptr && g_webview != nullptr) {
     gchar* uri_copy = g_strdup(uri);
     g_idle_add(
@@ -110,7 +118,6 @@ static GtkWidget* on_create(WebKitWebView* web_view,
   return nullptr;
 }
 
-// JS message handler callback
 static void on_script_message(WebKitUserContentManager* manager,
                               WebKitJavascriptResult* js_result,
                               gpointer user_data) {
@@ -128,7 +135,8 @@ static void on_script_message(WebKitUserContentManager* manager,
   g_free(json);
 }
 
-// Method: create webview
+// ---- Method handlers ----
+
 static void handle_create(FlMethodCall* method_call) {
   FlValue* args = fl_method_call_get_args(method_call);
   const char* url = fl_value_get_string(fl_value_lookup_string(args, "url"));
@@ -141,14 +149,12 @@ static void handle_create(FlMethodCall* method_call) {
   if (g_webview == nullptr) {
     g_content_manager = webkit_user_content_manager_new();
 
-    // Inject JS bridge shim on every page
     WebKitUserScript* script = webkit_user_script_new(
         JS_BRIDGE_SHIM, WEBKIT_USER_CONTENT_INJECT_ALL_FRAMES,
         WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START, nullptr, nullptr);
     webkit_user_content_manager_add_script(g_content_manager, script);
     webkit_user_script_unref(script);
 
-    // Persistent data (cookies, localStorage)
     gchar* data_dir =
         g_build_filename(g_get_user_data_dir(), "frank_karaoke", "webview", nullptr);
     gchar* cache_dir =
@@ -164,7 +170,6 @@ static void handle_create(FlMethodCall* method_call) {
     g_web_context =
         webkit_web_context_new_with_website_data_manager(data_manager);
 
-    // Persistent cookies
     WebKitCookieManager* cookie_manager =
         webkit_web_context_get_cookie_manager(g_web_context);
     gchar* cookie_file = g_build_filename(data_dir, "cookies.sqlite", nullptr);
@@ -193,13 +198,20 @@ static void handle_create(FlMethodCall* method_call) {
     g_signal_connect(g_webview, "create",
                      G_CALLBACK(on_create), nullptr);
 
-    // Pin to top-left so it doesn't fill the entire overlay.
-    gtk_widget_set_halign(g_webview_widget, GTK_ALIGN_FILL);
-    gtk_widget_set_valign(g_webview_widget, GTK_ALIGN_START);
+    // Use a GtkFixed container for precise pixel positioning.
+    // This prevents GtkOverlay from expanding the webview to fill the window.
+    g_fixed = GTK_FIXED(gtk_fixed_new());
+    gtk_widget_set_halign(GTK_WIDGET(g_fixed), GTK_ALIGN_FILL);
+    gtk_widget_set_valign(GTK_WIDGET(g_fixed), GTK_ALIGN_FILL);
+    gtk_fixed_put(g_fixed, g_webview_widget, 0, 0);
+    gtk_widget_show(GTK_WIDGET(g_fixed));
 
-    gtk_overlay_add_overlay(g_overlay, g_webview_widget);
+    gtk_overlay_add_overlay(g_overlay, GTK_WIDGET(g_fixed));
 
-    // Listen for resize so we can adjust webview height.
+    // Pass input through the GtkFixed container — only the webview
+    // (which has an explicit size) will receive events in its area.
+    gtk_overlay_set_overlay_pass_through(g_overlay, GTK_WIDGET(g_fixed), TRUE);
+
     g_signal_connect(GTK_WIDGET(g_overlay), "size-allocate",
                      G_CALLBACK(on_overlay_size_allocate), nullptr);
   }
@@ -219,52 +231,22 @@ static void handle_create(FlMethodCall* method_call) {
 
   webkit_web_view_load_uri(g_webview, url);
   gtk_widget_show(g_webview_widget);
+  apply_webview_layout();
 
   g_autoptr(FlMethodResponse) response =
       FL_METHOD_RESPONSE(fl_method_success_response_new(fl_value_new_bool(TRUE)));
   fl_method_call_respond(method_call, response, nullptr);
 }
 
-// Method: evaluate JavaScript
-static void on_js_finished(GObject* object, GAsyncResult* result,
-                           gpointer user_data) {
-  FlMethodCall* method_call = FL_METHOD_CALL(user_data);
-  GError* error = nullptr;
-  JSCValue* value = webkit_web_view_evaluate_javascript_finish(
-      WEBKIT_WEB_VIEW(object), result, &error);
+static void handle_set_frame(FlMethodCall* method_call) {
+  FlValue* args = fl_method_call_get_args(method_call);
+  g_bottom_inset = static_cast<int>(
+      fl_value_get_float(fl_value_lookup_string(args, "bottom")));
+  apply_webview_layout();
 
-  if (error != nullptr) {
-    g_autoptr(FlMethodResponse) response = FL_METHOD_RESPONSE(
-        fl_method_error_response_new("JS_ERROR", error->message, nullptr));
-    fl_method_call_respond(method_call, response, nullptr);
-    g_error_free(error);
-  } else {
-    gchar* str = nullptr;
-    g_autoptr(FlValue) result_val = nullptr;
-
-    if (jsc_value_is_string(value)) {
-      str = jsc_value_to_string(value);
-      result_val = fl_value_new_string(str);
-    } else if (jsc_value_is_boolean(value)) {
-      result_val = fl_value_new_bool(jsc_value_to_boolean(value));
-    } else if (jsc_value_is_number(value)) {
-      result_val = fl_value_new_float(jsc_value_to_double(value));
-    } else if (jsc_value_is_null(value) || jsc_value_is_undefined(value)) {
-      result_val = fl_value_new_null();
-    } else {
-      str = jsc_value_to_string(value);
-      result_val = fl_value_new_string(str);
-    }
-
-    g_autoptr(FlMethodResponse) response =
-        FL_METHOD_RESPONSE(fl_method_success_response_new(result_val));
-    fl_method_call_respond(method_call, response, nullptr);
-
-    g_free(str);
-    g_object_unref(value);
-  }
-
-  g_object_unref(method_call);
+  g_autoptr(FlMethodResponse) response =
+      FL_METHOD_RESPONSE(fl_method_success_response_new(fl_value_new_bool(TRUE)));
+  fl_method_call_respond(method_call, response, nullptr);
 }
 
 static void handle_evaluate_javascript(FlMethodCall* method_call) {
@@ -281,12 +263,52 @@ static void handle_evaluate_javascript(FlMethodCall* method_call) {
   gsize length = strlen(source);
 
   g_object_ref(method_call);
+
+  auto callback = [](GObject* object, GAsyncResult* result, gpointer user_data) {
+    FlMethodCall* mc = FL_METHOD_CALL(user_data);
+    GError* error = nullptr;
+    JSCValue* value = webkit_web_view_evaluate_javascript_finish(
+        WEBKIT_WEB_VIEW(object), result, &error);
+
+    if (error != nullptr) {
+      g_autoptr(FlMethodResponse) response = FL_METHOD_RESPONSE(
+          fl_method_error_response_new("JS_ERROR", error->message, nullptr));
+      fl_method_call_respond(mc, response, nullptr);
+      g_error_free(error);
+    } else {
+      gchar* str = nullptr;
+      g_autoptr(FlValue) result_val = nullptr;
+
+      if (jsc_value_is_string(value)) {
+        str = jsc_value_to_string(value);
+        result_val = fl_value_new_string(str);
+      } else if (jsc_value_is_boolean(value)) {
+        result_val = fl_value_new_bool(jsc_value_to_boolean(value));
+      } else if (jsc_value_is_number(value)) {
+        result_val = fl_value_new_float(jsc_value_to_double(value));
+      } else if (jsc_value_is_null(value) || jsc_value_is_undefined(value)) {
+        result_val = fl_value_new_null();
+      } else {
+        str = jsc_value_to_string(value);
+        result_val = fl_value_new_string(str);
+      }
+
+      g_autoptr(FlMethodResponse) response =
+          FL_METHOD_RESPONSE(fl_method_success_response_new(result_val));
+      fl_method_call_respond(mc, response, nullptr);
+
+      g_free(str);
+      g_object_unref(value);
+    }
+
+    g_object_unref(mc);
+  };
+
   webkit_web_view_evaluate_javascript(g_webview, source, length, nullptr,
-                                      nullptr, nullptr, on_js_finished,
+                                      nullptr, nullptr, callback,
                                       method_call);
 }
 
-// Method: add JS handler
 static void handle_add_js_handler(FlMethodCall* method_call) {
   if (g_content_manager == nullptr) {
     g_autoptr(FlMethodResponse) response = FL_METHOD_RESPONSE(
@@ -326,42 +348,20 @@ static void handle_add_js_handler(FlMethodCall* method_call) {
   fl_method_call_respond(method_call, response, nullptr);
 }
 
-// Method: set webview frame (bottom inset to leave room for Flutter nav)
-static void handle_set_frame(FlMethodCall* method_call) {
-  FlValue* args = fl_method_call_get_args(method_call);
-  g_bottom_inset = static_cast<int>(
-      fl_value_get_float(fl_value_lookup_string(args, "bottom")));
-
-  // Immediately apply if webview exists.
-  if (g_webview_widget != nullptr && g_overlay != nullptr) {
-    GtkAllocation alloc;
-    gtk_widget_get_allocation(GTK_WIDGET(g_overlay), &alloc);
-    int target_height = alloc.height - g_bottom_inset;
-    if (target_height < 100) target_height = 100;
-    gtk_widget_set_size_request(g_webview_widget, alloc.width, target_height);
-  }
-
-  g_autoptr(FlMethodResponse) response =
-      FL_METHOD_RESPONSE(fl_method_success_response_new(fl_value_new_bool(TRUE)));
-  fl_method_call_respond(method_call, response, nullptr);
-}
-
-// Method: show/hide webview
 static void handle_set_visible(FlMethodCall* method_call) {
-  if (g_webview_widget == nullptr) {
-    g_autoptr(FlMethodResponse) response = FL_METHOD_RESPONSE(
-        fl_method_success_response_new(fl_value_new_bool(FALSE)));
-    fl_method_call_respond(method_call, response, nullptr);
-    return;
-  }
-
   FlValue* args = fl_method_call_get_args(method_call);
   gboolean visible = fl_value_get_bool(fl_value_lookup_string(args, "visible"));
 
-  if (visible) {
-    gtk_widget_show(g_webview_widget);
-  } else {
-    gtk_widget_hide(g_webview_widget);
+  // Show/hide the fixed container (which contains the webview).
+  GtkWidget* target = g_fixed != nullptr ? GTK_WIDGET(g_fixed) : g_webview_widget;
+  if (target != nullptr) {
+    if (visible) {
+      gtk_widget_show(target);
+      if (g_webview_widget != nullptr) gtk_widget_show(g_webview_widget);
+      apply_webview_layout();
+    } else {
+      gtk_widget_hide(target);
+    }
   }
 
   g_autoptr(FlMethodResponse) response =
@@ -369,20 +369,21 @@ static void handle_set_visible(FlMethodCall* method_call) {
   fl_method_call_respond(method_call, response, nullptr);
 }
 
-// Method: destroy webview
 static void handle_destroy(FlMethodCall* method_call) {
-  if (g_webview_widget != nullptr) {
-    gtk_widget_hide(g_webview_widget);
-    gtk_container_remove(GTK_CONTAINER(g_overlay), g_webview_widget);
-    g_webview = nullptr;
-    g_webview_widget = nullptr;
-    g_content_manager = nullptr;
-    if (g_web_context != nullptr) {
-      g_object_unref(g_web_context);
-      g_web_context = nullptr;
-    }
-    g_handler_signals.clear();
+  GtkWidget* container = g_fixed != nullptr ? GTK_WIDGET(g_fixed) : g_webview_widget;
+  if (container != nullptr && g_overlay != nullptr) {
+    gtk_widget_hide(container);
+    gtk_container_remove(GTK_CONTAINER(g_overlay), container);
   }
+  g_webview = nullptr;
+  g_webview_widget = nullptr;
+  g_fixed = nullptr;
+  g_content_manager = nullptr;
+  if (g_web_context != nullptr) {
+    g_object_unref(g_web_context);
+    g_web_context = nullptr;
+  }
+  g_handler_signals.clear();
 
   g_autoptr(FlMethodResponse) response =
       FL_METHOD_RESPONSE(fl_method_success_response_new(fl_value_new_bool(TRUE)));
@@ -447,11 +448,13 @@ void webview_bridge_init(FlBinaryMessenger* messenger, GtkOverlay* overlay) {
 }
 
 void webview_bridge_dispose(void) {
-  if (g_webview_widget != nullptr && g_overlay != nullptr) {
-    gtk_container_remove(GTK_CONTAINER(g_overlay), g_webview_widget);
+  GtkWidget* container = g_fixed != nullptr ? GTK_WIDGET(g_fixed) : g_webview_widget;
+  if (container != nullptr && g_overlay != nullptr) {
+    gtk_container_remove(GTK_CONTAINER(g_overlay), container);
   }
   g_webview = nullptr;
   g_webview_widget = nullptr;
+  g_fixed = nullptr;
   g_content_manager = nullptr;
   g_handler_signals.clear();
   g_listening = FALSE;
