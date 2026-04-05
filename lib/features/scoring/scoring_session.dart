@@ -34,9 +34,13 @@ class ScoringSession {
   // Reference audio (from just_audio on Android, null on Linux)
   Float64List? _currentReferenceFrame;
 
-  // Rolling window of recent frame scores (~15 seconds at ~25fps mic rate)
-  final List<double> _recentScores = [];
-  static const _scoreWindowSize = 375;
+  // Exponential moving average for the live score.
+  // Alpha controls reactivity: higher = faster response, lower = more memory.
+  // 0.05 means each frame contributes ~5%, so it takes ~20 frames (~1 second)
+  // for a change to be fully reflected, but old history fades gradually.
+  double _emaScore = 0;
+  bool _emaInitialized = false;
+  static const _emaAlpha = 0.05;
 
   // Pitch stability: rolling window of recent MIDI values
   final List<double> _recentPitches = [];
@@ -61,11 +65,11 @@ class ScoringSession {
   Stream<ScoringUpdate> get scoreStream => _scoreController.stream;
   bool get isActive => _isActive;
 
-  /// Current score based on rolling window (responsive to recent singing).
+  /// Live score — exponential moving average that reacts quickly to
+  /// current singing but still carries accumulated history.
   int get currentScore {
-    if (_recentScores.isEmpty) return 0;
-    final avg = _recentScores.reduce((a, b) => a + b) / _recentScores.length;
-    return (avg * 100).round().clamp(0, 100);
+    if (!_emaInitialized) return 0;
+    return (_emaScore * 100).round().clamp(0, 100);
   }
 
   /// Final score for end-of-song (average of entire performance).
@@ -90,7 +94,8 @@ class ScoringSession {
       return false;
     }
 
-    _recentScores.clear();
+    _emaScore = 0;
+    _emaInitialized = false;
     _recentPitches.clear();
     _recentRms.clear();
     _totalVoicedFrames = 0;
@@ -121,12 +126,6 @@ class ScoringSession {
     if (_recentRms.length > _dynamicsWindowSize) _recentRms.removeAt(0);
 
     _processedFrames++;
-    if (_processedFrames <= 3 || _processedFrames % 200 == 0) {
-      debugPrint('Scoring: frame #$_processedFrames, '
-          'rms=${rms.toStringAsFixed(4)}, '
-          'score=$currentScore, '
-          'window=${_recentScores.length}');
-    }
 
     // Noise gate: skip silently, don't dilute scores
     if (rms < _noiseGateThreshold) {
@@ -158,50 +157,62 @@ class ScoringSession {
       return;
     }
 
-    // --- Chromatic snap (50%) ---
-    // How close to the nearest musical note? 100-cent tolerance (1 semitone)
-    // is generous enough for party karaoke with room mic noise.
+    // --- Chromatic snap (60%) ---
+    // How close to the nearest musical note?
+    // Use a generous curve: anything within 30 cents scores 90%+.
+    // Only truly off-pitch singing (40+ cents) drops significantly.
     final midi = hzToMidi(pitchHz);
     final nearestNote = midi.roundToDouble();
     final deviationCents = (midi - nearestNote).abs() * 100;
-    final snapScore = (1.0 - (deviationCents / 100.0)).clamp(0.0, 1.0);
+    // Quadratic falloff: gentle near center, steep at edges
+    final normalizedDev = (deviationCents / 50.0).clamp(0.0, 1.0);
+    final snapScore = 1.0 - (normalizedDev * normalizedDev);
 
-    // --- Pitch stability (35%) ---
+    // --- Pitch stability (30%) ---
+    // How steady is the pitch? Low variance = holding a note = good.
     _recentPitches.add(midi);
     if (_recentPitches.length > _stabilityWindowSize) _recentPitches.removeAt(0);
-    double stabilityScore = 0.5;
+    double stabilityScore = 0.7; // generous default before enough data
     if (_recentPitches.length >= 3) {
       final mean = _recentPitches.reduce((a, b) => a + b) / _recentPitches.length;
       final variance = _recentPitches
           .map((p) => (p - mean) * (p - mean))
           .reduce((a, b) => a + b) / _recentPitches.length;
       final stddev = math.sqrt(variance);
-      stabilityScore = (1.0 - (stddev / 2.0)).clamp(0.0, 1.0);
+      // Generous: stddev < 1 semitone = good. Only > 3 semitones = bad.
+      stabilityScore = (1.0 - (stddev / 3.0)).clamp(0.0, 1.0);
     }
 
-    // --- Dynamics (15%) ---
-    double dynamicsScore = 0.5;
+    // --- Dynamics (10%) ---
+    // Mostly a bonus — doesn't drag the score down much.
+    double dynamicsScore = 0.7; // generous default
     if (_recentRms.length >= 10) {
       final meanRms = _recentRms.reduce((a, b) => a + b) / _recentRms.length;
       final rmsVariance = _recentRms
           .map((r) => (r - meanRms) * (r - meanRms))
           .reduce((a, b) => a + b) / _recentRms.length;
       final rmsStddev = math.sqrt(rmsVariance);
-      if (rmsStddev < 0.005) {
-        dynamicsScore = 0.3;
-      } else if (rmsStddev > 0.2) {
-        dynamicsScore = 0.4;
-      } else {
-        dynamicsScore = (0.5 + rmsStddev * 5).clamp(0.5, 1.0);
-      }
+      // Any reasonable variation scores well
+      dynamicsScore = rmsStddev > 0.003 ? 0.8 : 0.5;
     }
 
-    // Composite
-    final frameScore = snapScore * 0.50
-        + stabilityScore * 0.35
-        + dynamicsScore * 0.15;
+    // Composite — designed so decent singing scores 70-85%,
+    // good singing 85-95%, only terrible singing drops below 50%.
+    final frameScore = snapScore * 0.60
+        + stabilityScore * 0.30
+        + dynamicsScore * 0.10;
 
     _pushScore(frameScore);
+
+    if (_processedFrames <= 5 || _processedFrames % 100 == 0) {
+      debugPrint('Scoring: #$_processedFrames '
+          'snap=${snapScore.toStringAsFixed(2)} '
+          'stab=${stabilityScore.toStringAsFixed(2)} '
+          'dyn=${dynamicsScore.toStringAsFixed(2)} '
+          'frame=${frameScore.toStringAsFixed(2)} '
+          'total=$currentScore '
+          'dev=${deviationCents.toStringAsFixed(0)}c');
+    }
 
     // Note name
     final noteIndex = nearestNote.round() % 12;
@@ -221,8 +232,12 @@ class ScoringSession {
   }
 
   void _pushScore(double score) {
-    _recentScores.add(score);
-    if (_recentScores.length > _scoreWindowSize) _recentScores.removeAt(0);
+    if (!_emaInitialized) {
+      _emaScore = score;
+      _emaInitialized = true;
+    } else {
+      _emaScore = _emaAlpha * score + (1 - _emaAlpha) * _emaScore;
+    }
     _totalVoicedFrames++;
     _allTimeScoreSum += score;
   }
