@@ -5,14 +5,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../state/providers.dart';
 import 'linux_webview_controller.dart';
+import 'youtube_sync_service.dart';
 import 'youtube_url_parser.dart';
 
 /// Linux WebView widget backed by native WebKitGTK.
 ///
 /// The native webview is overlaid on the GTK window via GtkOverlay.
-/// This widget is a transparent placeholder — the actual rendering
-/// happens in the native layer. It listens to the current tab and
-/// hides itself when the user navigates away from the Karaoke tab.
+/// When a video is detected, it triggers audio extraction and playback
+/// via the sync service, and mutes the webview's own audio.
 class LinuxWebViewWidget extends ConsumerStatefulWidget {
   const LinuxWebViewWidget({super.key, required this.initialUrl});
 
@@ -66,8 +66,43 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
 
   void _onUrlChange(String url) {
     final videoId = extractVideoId(url);
-    if (videoId != null) {
+    final currentId = ref.read(currentVideoIdProvider);
+
+    if (videoId != null && videoId != currentId) {
       ref.read(currentVideoIdProvider.notifier).state = videoId;
+      _onVideoDetected(videoId);
+    } else if (videoId == null && currentId != null) {
+      // Navigated away from a video
+      ref.read(currentVideoIdProvider.notifier).state = null;
+      ref.read(isVideoPlayingProvider.notifier).state = false;
+    }
+  }
+
+  Future<void> _onVideoDetected(String videoId) async {
+    final syncService = ref.read(syncServiceProvider);
+
+    ref.read(isAudioSyncingProvider.notifier).state = true;
+
+    // Fetch video title
+    final audioService = ref.read(youtubeAudioServiceProvider);
+    final title = await audioService.getVideoTitle(videoId);
+    if (mounted) {
+      ref.read(currentVideoTitleProvider.notifier).state = title;
+    }
+
+    // Start audio extraction and playback
+    await syncService.onVideoDetected(videoId);
+
+    if (mounted) {
+      ref.read(isAudioSyncingProvider.notifier).state = false;
+      ref.read(isVideoPlayingProvider.notifier).state = true;
+    }
+
+    // Mute the webview's video element so audio comes from just_audio
+    if (_created) {
+      await _controller.evaluateJavascript(
+        source: YouTubeSyncService.muteVideoJs,
+      );
     }
   }
 
@@ -82,7 +117,6 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
 
   @override
   Widget build(BuildContext context) {
-    // Show the native webview only when the Karaoke tab (index 0) is active.
     final currentTab = ref.watch(currentTabProvider);
     if (_created) {
       _controller.setVisible(currentTab == 0);
