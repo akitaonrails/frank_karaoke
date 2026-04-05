@@ -1,8 +1,6 @@
-import 'dart:io' show Platform;
-
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/constants.dart';
 import '../../features/youtube/youtube_webview.dart';
@@ -17,7 +15,7 @@ class HomeScreen extends ConsumerWidget {
     final videoId = ref.watch(currentVideoIdProvider);
     final score = ref.watch(currentScoreProvider);
 
-    final isWebViewSupported = !kIsWeb && (Platform.isAndroid || Platform.isLinux);
+    final isWebViewSupported = WebViewPlatform.instance != null;
 
     return Scaffold(
       body: Stack(
