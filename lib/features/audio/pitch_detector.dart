@@ -3,9 +3,23 @@ import 'dart:typed_data';
 
 import '../../core/constants.dart';
 
-/// YIN pitch detection algorithm.
+/// Result of pitch detection including confidence level.
+class PitchResult {
+  /// Detected fundamental frequency in Hz. 0 if no pitch detected.
+  final double pitchHz;
+
+  /// Confidence level 0.0-1.0. Higher = more certain this is a real
+  /// pitched sound (singing) vs noise/speech.
+  /// Based on the CMNDF minimum: clear tones produce low CMNDF values.
+  final double confidence;
+
+  const PitchResult(this.pitchHz, this.confidence);
+
+  static const none = PitchResult(0, 0);
+}
+
+/// YIN pitch detection algorithm with confidence output.
 ///
-/// Detects the fundamental frequency (F0) of a monophonic audio signal.
 /// Reference: "YIN, a fundamental frequency estimator for speech and music"
 /// by Alain de Cheveigné and Hideki Kawahara (2002).
 class PitchDetector {
@@ -20,28 +34,36 @@ class PitchDetector {
   /// Detect the fundamental frequency in Hz from a PCM audio frame.
   /// Returns 0.0 if no pitch is detected (silence or noise).
   double detectPitch(Float64List samples) {
-    if (samples.length < 2) return 0.0;
+    return detectPitchWithConfidence(samples).pitchHz;
+  }
+
+  /// Detect pitch with confidence level.
+  PitchResult detectPitchWithConfidence(Float64List samples) {
+    if (samples.length < 2) return PitchResult.none;
 
     final halfLen = samples.length ~/ 2;
 
-    // Step 1: Difference function
     final diff = _differenceFunction(samples, halfLen);
-
-    // Step 2: Cumulative mean normalized difference function (CMNDF)
     final cmndf = _cumulativeMeanNormalized(diff, halfLen);
 
-    // Step 3: Absolute threshold
-    final tauEstimate = _absoluteThreshold(cmndf, halfLen);
-    if (tauEstimate == -1) return 0.0;
+    final result = _absoluteThresholdWithConfidence(cmndf, halfLen);
+    if (result == null) return PitchResult.none;
 
-    // Step 4: Parabolic interpolation for sub-sample accuracy
+    final tauEstimate = result.$1;
+    final cmndfMin = result.$2;
+
     final betterTau = _parabolicInterpolation(cmndf, tauEstimate, halfLen);
 
-    if (betterTau <= 0) return 0.0;
-    return sampleRate / betterTau;
+    if (betterTau <= 0) return PitchResult.none;
+
+    final pitchHz = sampleRate / betterTau;
+    // Confidence: CMNDF minimum of 0.0 = perfect, 0.15 = threshold.
+    // Map to 0.0-1.0: lower CMNDF = higher confidence.
+    final confidence = (1.0 - cmndfMin / threshold).clamp(0.0, 1.0);
+
+    return PitchResult(pitchHz, confidence);
   }
 
-  /// Step 1: Compute the difference function d(tau).
   Float64List _differenceFunction(Float64List samples, int halfLen) {
     final diff = Float64List(halfLen);
     for (var tau = 1; tau < halfLen; tau++) {
@@ -55,7 +77,6 @@ class PitchDetector {
     return diff;
   }
 
-  /// Step 2: Cumulative mean normalized difference function.
   Float64List _cumulativeMeanNormalized(Float64List diff, int halfLen) {
     final cmndf = Float64List(halfLen);
     cmndf[0] = 1.0;
@@ -67,23 +88,20 @@ class PitchDetector {
     return cmndf;
   }
 
-  /// Step 3: Find the first tau where CMNDF dips below threshold.
-  int _absoluteThreshold(Float64List cmndf, int halfLen) {
-    // Skip very low tau values (would be unrealistically high frequencies).
-    final minTau = sampleRate ~/ 1000; // ~1000 Hz max
+  /// Returns (tau, cmndfMinValue) or null if no pitch detected.
+  (int, double)? _absoluteThresholdWithConfidence(Float64List cmndf, int halfLen) {
+    final minTau = sampleRate ~/ 1000;
     for (var tau = minTau; tau < halfLen; tau++) {
       if (cmndf[tau] < threshold) {
-        // Walk forward to find the local minimum.
         while (tau + 1 < halfLen && cmndf[tau + 1] < cmndf[tau]) {
           tau++;
         }
-        return tau;
+        return (tau, cmndf[tau]);
       }
     }
-    return -1; // No pitch detected
+    return null;
   }
 
-  /// Step 4: Parabolic interpolation for sub-sample accuracy.
   double _parabolicInterpolation(Float64List cmndf, int tau, int halfLen) {
     if (tau <= 0 || tau >= halfLen - 1) return tau.toDouble();
 
@@ -97,7 +115,7 @@ class PitchDetector {
     return tau + (s2 - s0) / (2 * denominator);
   }
 
-  /// Utility: compute RMS energy of a frame. Used for noise gating.
+  /// Utility: compute RMS energy of a frame.
   static double rmsEnergy(Float64List samples) {
     if (samples.isEmpty) return 0.0;
     double sum = 0.0;

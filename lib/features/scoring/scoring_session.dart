@@ -196,10 +196,14 @@ class ScoringSession {
     // or defaults to 0.04. Prevents score inflation from room noise.
     final isSinging = rms > _singingThreshold;
 
-    final pitchHz = _pitchDetector.detectPitch(samples);
-    if (pitchHz < 60 || !isSinging) {
-      // Unpitched noise while mic is active — this DOES break streak
-      // (you're making sound but it's not singing)
+    final pitchResult = _pitchDetector.detectPitchWithConfidence(samples);
+    final pitchHz = pitchResult.pitchHz;
+    final confidence = pitchResult.confidence;
+
+    // Reject: no pitch, not singing, or low-confidence detection.
+    // Confidence < 0.3 means YIN barely found a periodic signal —
+    // likely speech, noise, or breath, not actual singing.
+    if (pitchHz < 60 || !isSinging || confidence < 0.3) {
       if (_mode == ScoringMode.streak) _streakCount = 0;
       _scoreController.add(ScoringUpdate(
         singerPitchHz: 0,
@@ -237,11 +241,11 @@ class ScoringSession {
     }
 
     // --- Composite ---
-    // Primary score dominates (90%). Stability is a small bonus/penalty.
-    // This ensures the score swings with the primary dimension, not
-    // averaging out to ~50% from secondary anchor values.
-    var frameScore = primaryScore * 0.90
-        + stabilityScore * 0.10;
+    // Primary score dominates (90%). Stability is a small bonus.
+    // Then scaled by pitch confidence: uncertain detections (speech,
+    // noise) score lower even if the detected pitch looks ok.
+    var frameScore = (primaryScore * 0.90 + stabilityScore * 0.10)
+        * confidence;
 
     // Streak mode: combo system
     if (_mode == ScoringMode.streak) {
@@ -274,6 +278,7 @@ class ScoringSession {
     if (_processedFrames <= 5 || _processedFrames % 100 == 0) {
       debugPrint('Scoring[${_mode.name}]: #$_processedFrames '
           'primary=${primaryScore.toStringAsFixed(2)} '
+          'conf=${confidence.toStringAsFixed(2)} '
           'frame=${frameScore.toStringAsFixed(2)} '
           'live=$currentScore overall=$finalScore '
           'streak=$_streakCount '
