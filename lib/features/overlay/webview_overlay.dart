@@ -1,6 +1,129 @@
 /// JavaScript overlay injected into the YouTube webview.
 /// Uses DOM createElement for YouTube's Trusted Types CSP.
 class WebviewOverlay {
+  /// Welcome screen shown on first launch.
+  static const welcomeOverlayJs = '''
+    (function() {
+      if (document.getElementById('fk-welcome')) return;
+
+      var bg = document.createElement('div');
+      bg.id = 'fk-welcome';
+      bg.style.cssText = 'position:fixed;inset:0;z-index:999999;'
+        + 'background:rgba(0,0,0,0.88);display:flex;align-items:center;'
+        + 'justify-content:center;font-family:system-ui,sans-serif;'
+        + 'animation:fkFadeIn 0.4s ease-out;';
+
+      var card = document.createElement('div');
+      card.style.cssText = 'max-width:480px;background:rgba(20,20,40,0.95);'
+        + 'border-radius:24px;padding:32px 36px;color:#fff;'
+        + 'border:1px solid rgba(108,92,231,0.4);'
+        + 'box-shadow:0 8px 60px rgba(108,92,231,0.3);';
+
+      var title = document.createElement('div');
+      title.style.cssText = 'font-size:28px;font-weight:800;margin-bottom:8px;'
+        + 'background:linear-gradient(135deg,#6c5ce7,#00d2ff);'
+        + '-webkit-background-clip:text;-webkit-text-fill-color:transparent;';
+      title.textContent = 'Frank Karaoke';
+      card.appendChild(title);
+
+      var sub = document.createElement('div');
+      sub.style.cssText = 'font-size:13px;color:rgba(255,255,255,0.5);margin-bottom:20px;';
+      sub.textContent = 'Sing along with any YouTube karaoke video';
+      card.appendChild(sub);
+
+      var sections = [
+        {
+          icon: '\\u{1F3B5}',
+          title: 'No song data needed',
+          text: 'This app scores your singing without pre-made song files. '
+            + 'It analyzes the video audio in real-time and compares it to your voice. '
+            + 'Results are approximate but fun!'
+        },
+        {
+          icon: '\\u{1F3AF}',
+          title: '4 scoring modes',
+          text: 'Pitch Match, Contour, Interval, and Streak \\u2014 each scores differently. '
+            + 'Try them all to find what feels best for each song.'
+        },
+        {
+          icon: '\\u2699\\uFE0F',
+          title: 'Settings overlay',
+          text: 'Click the gear icon (top left) to change mic preset, '
+            + 'scoring mode, and pitch shift for high/low songs.'
+        }
+      ];
+
+      for (var i = 0; i < sections.length; i++) {
+        var s = sections[i];
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:12px;margin-bottom:14px;align-items:flex-start;';
+        var icon = document.createElement('div');
+        icon.style.cssText = 'font-size:20px;flex-shrink:0;margin-top:2px;';
+        icon.textContent = s.icon;
+        row.appendChild(icon);
+        var col = document.createElement('div');
+        var t = document.createElement('div');
+        t.style.cssText = 'font-size:13px;font-weight:700;color:#fff;margin-bottom:2px;';
+        t.textContent = s.title;
+        col.appendChild(t);
+        var p = document.createElement('div');
+        p.style.cssText = 'font-size:11px;color:rgba(255,255,255,0.55);line-height:1.4;';
+        p.textContent = s.text;
+        col.appendChild(p);
+        row.appendChild(col);
+        card.appendChild(row);
+      }
+
+      var btnRow = document.createElement('div');
+      btnRow.style.cssText = 'display:flex;gap:10px;margin-top:20px;justify-content:flex-end;';
+
+      var dontShow = document.createElement('div');
+      dontShow.textContent = "Don\\u0027t show again";
+      dontShow.style.cssText = 'padding:10px 18px;border-radius:12px;'
+        + 'background:transparent;color:rgba(255,255,255,0.4);'
+        + 'font-size:12px;cursor:pointer;user-select:none;-webkit-user-select:none;'
+        + 'transition:color 0.2s;display:flex;align-items:center;';
+      dontShow.addEventListener('mouseenter', function() { dontShow.style.color = '#fff'; });
+      dontShow.addEventListener('mouseleave', function() { dontShow.style.color = 'rgba(255,255,255,0.4)'; });
+      dontShow.addEventListener('click', function(e) {
+        e.stopPropagation(); e.preventDefault();
+        if (window.webkit && window.webkit.messageHandlers &&
+            window.webkit.messageHandlers.FrankDismissWelcome) {
+          window.webkit.messageHandlers.FrankDismissWelcome.postMessage('permanent');
+        }
+        bg.style.animation = 'fkFadeIn 0.3s ease-out reverse';
+        setTimeout(function() { if (bg.parentNode) bg.remove(); }, 300);
+      }, true);
+      dontShow.addEventListener('mousedown', function(e){ e.stopPropagation(); }, true);
+      btnRow.appendChild(dontShow);
+
+      var closeBtn = document.createElement('div');
+      closeBtn.textContent = 'Got it!';
+      closeBtn.style.cssText = 'padding:10px 24px;border-radius:12px;'
+        + 'background:linear-gradient(135deg,#6c5ce7,#00d2ff);color:#fff;'
+        + 'font-size:13px;font-weight:700;cursor:pointer;'
+        + 'user-select:none;-webkit-user-select:none;'
+        + 'box-shadow:0 4px 20px rgba(108,92,231,0.4);transition:transform 0.2s;';
+      closeBtn.addEventListener('mouseenter', function() { closeBtn.style.transform = 'scale(1.05)'; });
+      closeBtn.addEventListener('mouseleave', function() { closeBtn.style.transform = 'scale(1)'; });
+      closeBtn.addEventListener('click', function(e) {
+        e.stopPropagation(); e.preventDefault();
+        bg.style.animation = 'fkFadeIn 0.3s ease-out reverse';
+        setTimeout(function() { if (bg.parentNode) bg.remove(); }, 300);
+      }, true);
+      closeBtn.addEventListener('mousedown', function(e){ e.stopPropagation(); }, true);
+      btnRow.appendChild(closeBtn);
+
+      card.appendChild(btnRow);
+      bg.appendChild(card);
+
+      var style = document.createElement('style');
+      style.textContent = '@keyframes fkFadeIn{from{opacity:0}to{opacity:1}}';
+      bg.appendChild(style);
+
+      document.body.appendChild(bg);
+    })();
+  ''';
   /// Full overlay with scoring + toggleable controls panel.
   static String injectOverlayJs({
     required String singerName,

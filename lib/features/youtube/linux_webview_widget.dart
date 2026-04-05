@@ -39,6 +39,8 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
   bool _overlayInjected = false;
   Timer? _videoEndTimer;
   bool _celebrationShown = false;
+  bool _welcomeShown = false;
+  bool _welcomeDismissedPermanently = false;
 
   @override
   void initState() {
@@ -65,6 +67,7 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
         ref.read(scoringModeProvider.notifier).state = mode;
       }
     }
+    _welcomeDismissedPermanently = prefs.getBool('welcome_dismissed') ?? false;
   }
 
   Future<void> _saveSetting(String key, String value) async {
@@ -92,6 +95,10 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       handlerName: 'FrankRestart',
       callback: (_) => _restartScoring(),
     );
+    _controller.addJavaScriptHandler(
+      handlerName: 'FrankDismissWelcome',
+      callback: (_) => _dismissWelcomePermanently(),
+    );
   }
 
   void _onPresetChange(dynamic presetId) {
@@ -107,6 +114,12 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
     if (_scoringSession != null) {
       _restartScoring();
     }
+  }
+
+  Future<void> _dismissWelcomePermanently() async {
+    _welcomeDismissedPermanently = true;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('welcome_dismissed', true);
   }
 
   void _onModeChange(dynamic modeId) {
@@ -149,6 +162,13 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
         if (url != null) _onUrlChange(url);
         if (_created) {
           _controller.evaluateJavascript(source: _cleanYouTubeUiJs);
+          // Show welcome overlay on first page load.
+          if (!_welcomeShown && !_welcomeDismissedPermanently) {
+            _welcomeShown = true;
+            _controller.evaluateJavascript(
+              source: WebviewOverlay.welcomeOverlayJs,
+            );
+          }
         }
         if (_overlayInjected) _reinjectOverlay();
       case 'onUpdateVisitedHistory':
