@@ -1,4 +1,5 @@
 import '../../core/logo_assets.dart';
+import '../../core/strings.dart';
 
 /// JavaScript overlay injected into the YouTube webview.
 /// Uses DOM createElement for YouTube's Trusted Types CSP.
@@ -28,31 +29,24 @@ class WebviewOverlay {
 
       var sub = document.createElement('div');
       sub.style.cssText = 'font-size:15px;color:rgba(255,255,255,0.5);margin-bottom:24px;';
-      sub.textContent = 'Sing along with any YouTube karaoke video';
+      sub.textContent = '${S.welcomeSubtitle}';
       card.appendChild(sub);
 
       var sections = [
         {
           icon: '\\u{1F3B5}',
-          title: 'How it works',
-          text: 'Play any YouTube karaoke video and sing along. '
-            + 'The app listens to the music and your voice separately, '
-            + 'then scores how well they match in real-time.'
+          title: '${S.welcomeHowTitle}',
+          text: '${S.welcomeHowBody}'
         },
         {
           icon: '\\u{1F3AF}',
-          title: 'Pick your scoring style',
-          text: 'Pitch \\u2014 are you hitting the right notes? '
-            + 'Contour \\u2014 are you following the melody shape? '
-            + 'Interval \\u2014 are your note jumps right? '
-            + 'Streak \\u2014 party mode with combo multipliers!'
+          title: '${S.welcomeScoringTitle}',
+          text: '${S.welcomeScoringBody}'
         },
         {
           icon: '\\u{1F527}',
-          title: 'Settings (gear icon, top-left)',
-          text: 'Mic preset, scoring mode, pitch shift, and mic calibration. '
-            + 'Calibrate first! It listens to your room for 3 seconds to set '
-            + 'the right noise level.'
+          title: '${S.welcomeSettingsTitle}',
+          text: '${S.welcomeSettingsBody}'
         }
       ];
 
@@ -82,15 +76,14 @@ class WebviewOverlay {
       calTip.style.cssText = 'background:rgba(0,210,255,0.1);border:1px solid rgba(0,210,255,0.25);'
         + 'border-radius:12px;padding:10px 14px;margin-bottom:4px;'
         + 'font-size:12px;color:rgba(0,210,255,0.85);line-height:1.4;';
-      calTip.textContent = '\\u{1F4A1} Tip: Open settings and calibrate your mic before singing. '
-        + 'It takes 3 seconds and makes scoring work in any room.';
+      calTip.textContent = '${S.welcomeCalibrationTip}';
       card.appendChild(calTip);
 
       var btnRow = document.createElement('div');
       btnRow.style.cssText = 'display:flex;gap:10px;margin-top:16px;justify-content:flex-end;';
 
       var dontShow = document.createElement('div');
-      dontShow.textContent = "Don\\u0027t show again";
+      dontShow.textContent = '${S.welcomeDontShowAgain}';
       dontShow.style.cssText = 'padding:10px 18px;border-radius:12px;'
         + 'background:transparent;color:rgba(255,255,255,0.4);'
         + 'font-size:12px;cursor:pointer;user-select:none;-webkit-user-select:none;'
@@ -109,7 +102,7 @@ class WebviewOverlay {
       btnRow.appendChild(dontShow);
 
       var closeBtn = document.createElement('div');
-      closeBtn.textContent = 'Got it!';
+      closeBtn.textContent = '${S.welcomeGotIt}';
       closeBtn.style.cssText = 'padding:10px 24px;border-radius:12px;'
         + 'background:linear-gradient(135deg,#6c5ce7,#00d2ff);color:#fff;'
         + 'font-size:13px;font-weight:700;cursor:pointer;'
@@ -224,13 +217,13 @@ class WebviewOverlay {
       scoreBox.addEventListener('mousedown', function(e){ e.stopPropagation(); }, true);
       var scoreLabel = document.createElement('div');
       scoreLabel.style.cssText = 'font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:3px;margin-bottom:4px;';
-      scoreLabel.textContent = 'SCORE';
+      scoreLabel.textContent = '${S.scoreLabel}';
       scoreBox.appendChild(scoreLabel);
       var modeLabel = document.createElement('div');
       modeLabel.setAttribute('data-mode-label', '1');
       modeLabel.style.cssText = 'font-size:9px;color:rgba(108,92,231,0.8);'
         + 'letter-spacing:1px;margin-bottom:4px;font-weight:600;';
-      modeLabel.textContent = 'Tap to change mode';
+      modeLabel.textContent = '${S.tapToChangeMode}';
       scoreBox.appendChild(modeLabel);
       var scoreValue = document.createElement('div');
       scoreValue.id = 'fk-score-value';
@@ -252,7 +245,7 @@ class WebviewOverlay {
         + 'display:flex;align-items:baseline;justify-content:center;gap:6px;';
       var overallLabel = document.createElement('div');
       overallLabel.style.cssText = 'font-size:9px;color:rgba(255,255,255,0.3);letter-spacing:2px;';
-      overallLabel.textContent = 'OVERALL';
+      overallLabel.textContent = '${S.overallLabel}';
       overallRow.appendChild(overallLabel);
       var overallValue = document.createElement('div');
       overallValue.id = 'fk-overall-value';
@@ -303,7 +296,7 @@ class WebviewOverlay {
       var presetLabel = document.createElement('div');
       presetLabel.style.cssText = 'font-size:10px;color:rgba(255,255,255,0.4);'
         + 'letter-spacing:2px;margin-bottom:8px;';
-      presetLabel.textContent = 'MIC PRESET';
+      presetLabel.textContent = '${S.micPresetLabel}';
       panel.appendChild(presetLabel);
 
       var presetRow = document.createElement('div');
@@ -311,9 +304,9 @@ class WebviewOverlay {
       presetRow.style.cssText = 'display:flex;gap:6px;margin-bottom:16px;';
 
       var presets = [
-        {id:'externalMic', label:'\\u{1F3A4} Clean'},
-        {id:'roomMic', label:'\\u{1F3E0} Room'},
-        {id:'partyMode', label:'\\u{1F389} Party'}
+        {id:'externalMic', label:'${S.presetClean}'},
+        {id:'roomMic', label:'${S.presetRoom}'},
+        {id:'partyMode', label:'${S.presetParty}'}
       ];
       for (var i = 0; i < presets.length; i++) {
         var p = presets[i];
@@ -346,7 +339,7 @@ class WebviewOverlay {
       pitchLabel.style.cssText = 'font-size:10px;color:rgba(255,255,255,0.4);'
         + 'letter-spacing:2px;margin-bottom:8px;display:flex;'
         + 'justify-content:space-between;align-items:center;';
-      pitchLabel.textContent = 'PITCH SHIFT';
+      pitchLabel.textContent = '${S.pitchShiftLabel}';
       var pitchValueLabel = document.createElement('span');
       pitchValueLabel.id = 'fk-pitch-value';
       pitchValueLabel.style.cssText = 'color:#00d2ff;font-size:14px;font-weight:700;letter-spacing:0;';
@@ -397,7 +390,7 @@ class WebviewOverlay {
 
       // Restart button
       var restartBtn = document.createElement('div');
-      restartBtn.textContent = '\\u21BB  Restart Song';
+      restartBtn.textContent = '${S.restartSong}';
       restartBtn.style.cssText = 'padding:10px;border-radius:10px;'
         + 'background:rgba(255,159,67,0.15);border:1px solid rgba(255,159,67,0.3);'
         + 'color:#ff9f43;font-size:13px;font-weight:600;text-align:center;'
@@ -420,7 +413,7 @@ class WebviewOverlay {
       // Calibrate mic button
       var calBtn = document.createElement('div');
       calBtn.id = 'fk-calibrate-btn';
-      calBtn.textContent = '\\u{1F399} Calibrate Mic';
+      calBtn.textContent = '${S.calibrateMic}';
       calBtn.style.cssText = 'padding:10px;border-radius:10px;margin-top:8px;'
         + 'background:rgba(0,210,255,0.1);border:1px solid rgba(0,210,255,0.25);'
         + 'color:rgba(0,210,255,0.8);font-size:13px;font-weight:600;text-align:center;'
@@ -533,33 +526,33 @@ class WebviewOverlay {
     // Streak-specific messages
     if (isStreak && streakCount > 30) {
       color = '#ffd700'; glow = '0 0 30px rgba(255,215,0,0.7)';
-      feedback = '\u{1F525} ${streakCount}x ON FIRE!';
+      feedback = S.streakOnFire(streakCount);
     } else if (isStreak && streakCount > 15) {
       color = '#ffd700'; glow = '0 0 25px rgba(255,215,0,0.6)';
-      feedback = '\u{1F525} ${streakCount}x COMBO!';
+      feedback = S.streakCombo(streakCount);
     } else if (isStreak && streakCount > 5) {
       color = '#ff9f43'; glow = '0 0 20px rgba(255,159,67,0.5)';
-      feedback = '\u{1F525} ${streakCount}x streak';
+      feedback = S.streakCount(streakCount);
     } else if (isStreak && streakCount == 0 && liveScore < 15) {
       color = '#ff6b6b'; glow = '0 0 15px rgba(255,107,107,0.3)';
-      feedback = 'Streak broken!';
+      feedback = S.feedbackStreakBroken;
     // General messages for all modes
     } else if (liveScore >= 95) {
-      color = '#ffd700'; glow = '0 0 30px rgba(255,215,0,0.7)'; feedback = 'PERFECT!';
+      color = '#ffd700'; glow = '0 0 30px rgba(255,215,0,0.7)'; feedback = S.feedbackPerfect;
     } else if (liveScore >= 85) {
-      color = '#ffd700'; glow = '0 0 25px rgba(255,215,0,0.6)'; feedback = 'Incredible!';
+      color = '#ffd700'; glow = '0 0 25px rgba(255,215,0,0.6)'; feedback = S.feedbackIncredible;
     } else if (liveScore >= 75) {
-      color = '#00ff88'; glow = '0 0 20px rgba(0,255,136,0.5)'; feedback = 'Nailing it!';
+      color = '#00ff88'; glow = '0 0 20px rgba(0,255,136,0.5)'; feedback = S.feedbackNailingIt;
     } else if (liveScore >= 65) {
-      color = '#00ff88'; glow = '0 0 18px rgba(0,255,136,0.4)'; feedback = 'Sounding good!';
+      color = '#00ff88'; glow = '0 0 18px rgba(0,255,136,0.4)'; feedback = S.feedbackSoundingGood;
     } else if (liveScore >= 50) {
-      color = '#00d2ff'; glow = '0 0 20px rgba(0,210,255,0.4)'; feedback = 'Keep going!';
+      color = '#00d2ff'; glow = '0 0 20px rgba(0,210,255,0.4)'; feedback = S.feedbackKeepGoing;
     } else if (liveScore >= 35) {
-      color = '#00d2ff'; glow = '0 0 15px rgba(0,210,255,0.3)'; feedback = 'Warming up...';
+      color = '#00d2ff'; glow = '0 0 15px rgba(0,210,255,0.3)'; feedback = S.feedbackWarmingUp;
     } else if (liveScore >= 20) {
-      color = '#ff9f43'; glow = '0 0 15px rgba(255,159,67,0.4)'; feedback = 'Sing louder!';
+      color = '#ff9f43'; glow = '0 0 15px rgba(255,159,67,0.4)'; feedback = S.feedbackSingLouder;
     } else if (liveScore > 5) {
-      color = '#ff6b6b'; glow = '0 0 12px rgba(255,107,107,0.3)'; feedback = 'Find the melody!';
+      color = '#ff6b6b'; glow = '0 0 12px rgba(255,107,107,0.3)'; feedback = S.feedbackFindMelody;
     } else {
       color = '#ff6b6b'; glow = '0 0 10px rgba(255,107,107,0.2)'; feedback = '';
     }
@@ -650,11 +643,11 @@ class WebviewOverlay {
 
   static String celebrationJs(int score) {
     String phrase, emoji;
-    if (score >= 90) { phrase = 'SUPERSTAR!'; emoji = '\u{1F31F}'; }
-    else if (score >= 75) { phrase = 'Well Done!'; emoji = '\u{1F389}'; }
-    else if (score >= 50) { phrase = 'Nice Try!'; emoji = '\u{1F44F}'; }
-    else if (score >= 25) { phrase = 'Almost There!'; emoji = '\u{1F4AA}'; }
-    else { phrase = 'Keep Practicing!'; emoji = '\u{1F3A4}'; }
+    if (score >= 90) { phrase = S.celebSuperstar; emoji = '\u{1F31F}'; }
+    else if (score >= 75) { phrase = S.celebWellDone; emoji = '\u{1F389}'; }
+    else if (score >= 50) { phrase = S.celebNiceTry; emoji = '\u{1F44F}'; }
+    else if (score >= 25) { phrase = S.celebAlmostThere; emoji = '\u{1F4AA}'; }
+    else { phrase = S.celebKeepPracticing; emoji = '\u{1F3A4}'; }
     return '''
       (function() {
         var old=document.getElementById('fk-celebration');if(old)old.remove();
@@ -680,7 +673,7 @@ class WebviewOverlay {
         var pt=document.createElement('div');
         pt.style.cssText='font-size:18px;color:rgba(255,255,255,0.5);letter-spacing:6px;'
           +'animation:fkSlideUp 0.5s ease-out 0.5s both;';
-        pt.textContent='POINTS';c.appendChild(pt);
+        pt.textContent='${S.celebPoints}';c.appendChild(pt);
         var colors=['#ffd700','#ff6b6b','#00d2ff','#00ff88','#ff9f43','#6c5ce7'];
         for(var i=0;i<30;i++){
           var p=document.createElement('div');
@@ -750,27 +743,27 @@ class WebviewOverlay {
 
       var title = document.createElement('div');
       title.style.cssText = 'font-size:20px;font-weight:800;margin-bottom:6px;color:#00d2ff;';
-      title.textContent = 'Choose Scoring Mode';
+      title.textContent = '${S.chooseScoringMode}';
       card.appendChild(title);
 
       var sub = document.createElement('div');
       sub.style.cssText = 'font-size:12px;color:rgba(255,255,255,0.35);margin-bottom:16px;';
-      sub.textContent = 'Tap to switch. Song will restart with new scoring.';
+      sub.textContent = '${S.modeSelectorSubtitle}';
       card.appendChild(sub);
 
       var modes = [
-        {id:'pitchClass', name:'Pitch Match', icon:'\\u{1F3AF}',
-          when:'Best for songs you know well',
-          desc:'Are you hitting the right notes? Detects your pitch and checks if it lands cleanly on musical notes (C, D, E...). Holding steady notes scores higher than wobbling between them.'},
-        {id:'contour', name:'Contour', icon:'\\u{3030}',
-          when:'Best for learning new songs',
-          desc:'Are you following the melody shape? Scores whether your voice goes up and down with the music. Does not care which exact note you sing, only the direction and flow.'},
-        {id:'interval', name:'Intervals', icon:'\\u{1F4D0}',
-          when:'Best when singing in another key',
-          desc:'Are your note jumps musical? Steps and thirds score high. Wild octave jumps score low. Rewards proper phrasing regardless of which key you are singing in.'},
-        {id:'streak', name:'Streak', icon:'\\u{1F525}',
-          when:'Best for parties and competition',
-          desc:'Pitch scoring with a combo multiplier! Good notes build your streak (5x, 15x, 30x ON FIRE!). One bad note resets to zero. Pauses freeze the streak safely. Most exciting mode!'}
+        {id:'pitchClass', name:'${S.modePitchName}', icon:'\\u{1F3AF}',
+          when:'${S.modePitchWhen}',
+          desc:'${S.modePitchDesc}'},
+        {id:'contour', name:'${S.modeContourName}', icon:'\\u{3030}',
+          when:'${S.modeContourWhen}',
+          desc:'${S.modeContourDesc}'},
+        {id:'interval', name:'${S.modeIntervalName}', icon:'\\u{1F4D0}',
+          when:'${S.modeIntervalWhen}',
+          desc:'${S.modeIntervalDesc}'},
+        {id:'streak', name:'${S.modeStreakName}', icon:'\\u{1F525}',
+          when:'${S.modeStreakWhen}',
+          desc:'${S.modeStreakDesc}'}
       ];
 
       for (var i = 0; i < modes.length; i++) {
@@ -799,7 +792,7 @@ class WebviewOverlay {
             badge.style.cssText = 'font-size:9px;background:rgba(0,210,255,0.3);'
               + 'color:#00d2ff;padding:2px 8px;border-radius:10px;font-weight:600;'
               + 'letter-spacing:1px;margin-left:auto;';
-            badge.textContent = 'ACTIVE';
+            badge.textContent = '${S.modeActiveBadge}';
             header.appendChild(badge);
           }
           row.appendChild(header);
@@ -861,7 +854,7 @@ class WebviewOverlay {
         d.appendChild(msg);
         var sub = document.createElement('div');
         sub.style.cssText = 'color:rgba(255,255,255,0.35);font-size:12px;margin-top:6px;';
-        sub.textContent = 'First time takes a moment';
+        sub.textContent = '${S.processingSubtitle}';
         d.appendChild(sub);
         var style = document.createElement('style');
         style.textContent = '@keyframes fkSpin{to{transform:rotate(360deg)}}';

@@ -3,9 +3,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
+import 'core/strings.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  S.init();
 
   // Edge-to-edge: keep Samsung status bar visible, app renders below it.
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);

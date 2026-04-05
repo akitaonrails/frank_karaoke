@@ -12,6 +12,7 @@ import '../../core/audio_preset.dart';
 import '../../core/logo_assets.dart';
 import '../../core/constants.dart';
 import '../../core/scoring_mode.dart';
+import '../../core/strings.dart';
 import '../../state/providers.dart';
 import '../overlay/webview_overlay.dart';
 import '../scoring/scoring_session.dart';
@@ -290,7 +291,7 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
   Future<void> _onVideoDetected(String videoId) async {
     // Pause video and show loading overlay immediately.
     _runJs('''(function(){var v=document.querySelector('video');if(v)v.pause();})();''');
-    _runJs(WebviewOverlay.processingOverlayJs(true, message: 'Loading...'));
+    _runJs(WebviewOverlay.processingOverlayJs(true, message: S.processingLoading));
 
     ref.read(isAudioSyncingProvider.notifier).state = true;
 
@@ -324,7 +325,7 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
 
   Future<void> _buildOracleInBackground(String videoId, AudioStreamInfo streamInfo) async {
     _runJs(WebviewOverlay.processingOverlayJs(true,
-        message: 'Loading song data...'));
+        message: S.processingLoadingSong));
     try {
       final oracle = ref.read(pitchOracleProvider);
       final built = await oracle.buildForVideo(videoId, streamInfo);
@@ -515,14 +516,14 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
   }
 
   Future<void> _calibrateMic() async {
-    _runJs(WebviewOverlay.updateCalibrateJs('\\u{1F399} Stay quiet... 3s', active: true));
+    _runJs(WebviewOverlay.updateCalibrateJs(S.calibCountdown(3), active: true));
 
     final mic = ref.read(micCaptureServiceProvider);
     final wasRecording = mic.isRecording;
     if (!wasRecording) {
       final started = await mic.start();
       if (!started) {
-        _runJs(WebviewOverlay.updateCalibrateJs('\\u{274C} Mic unavailable'));
+        _runJs(WebviewOverlay.updateCalibrateJs(S.calibMicUnavailable));
         return;
       }
     }
@@ -534,14 +535,14 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
 
     for (var i = 2; i >= 0; i--) {
       await Future.delayed(const Duration(seconds: 1));
-      if (i > 0) _runJs(WebviewOverlay.updateCalibrateJs('\\u{1F399} Stay quiet... ${i}s', active: true));
+      if (i > 0) _runJs(WebviewOverlay.updateCalibrateJs(S.calibCountdown(i), active: true));
     }
 
     await sub.cancel();
     if (!wasRecording) await mic.stop();
 
     if (rmsValues.isEmpty) {
-      _runJs(WebviewOverlay.updateCalibrateJs('\\u{274C} No data'));
+      _runJs(WebviewOverlay.updateCalibrateJs(S.calibNoData));
       return;
     }
 
@@ -557,7 +558,7 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
     await prefs.setDouble('calibrated_noise_gate', noiseGate);
     await prefs.setDouble('calibrated_singing_threshold', singingThreshold);
 
-    _runJs(WebviewOverlay.updateCalibrateJs('\\u{2705} Calibrated'));
+    _runJs(WebviewOverlay.updateCalibrateJs(S.calibDone));
     if (_scoringSession != null) _restartScoring();
   }
 
