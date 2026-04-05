@@ -48,17 +48,11 @@ class WebviewOverlay {
             + 'Streak \\u2014 party mode with combo multipliers!'
         },
         {
-          icon: '\\u2699\\uFE0F',
-          title: 'Gear icon = settings',
-          text: 'Top-left corner. Set your mic type, switch scoring mode, '
-            + 'and shift pitch up/down for songs outside your range.'
-        },
-        {
-          icon: '\\u{1F399}',
-          title: 'Calibrate your mic first',
-          text: 'Open settings and tap Calibrate Mic. Stay quiet for 3 seconds '
-            + 'so the app learns your room noise level. This makes scoring accurate '
-            + 'in any environment.'
+          icon: '\\u2699',
+          title: 'Settings (gear icon, top-left)',
+          text: 'Mic preset, scoring mode, pitch shift, and mic calibration. '
+            + 'Calibrate first! It listens to your room for 3 seconds to set '
+            + 'the right noise level.'
         }
       ];
 
