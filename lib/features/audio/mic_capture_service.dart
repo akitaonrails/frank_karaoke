@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:record/record.dart';
 
@@ -13,33 +12,9 @@ class MicCaptureService {
   StreamSubscription<Uint8List>? _streamSub;
   final _pcmController = StreamController<MicFrame>.broadcast();
   bool _isRecording = false;
-  bool _sessionConfigured = false;
 
   Stream<MicFrame> get pcmStream => _pcmController.stream;
   bool get isRecording => _isRecording;
-
-  /// Configure audio session so mic recording doesn't pause YouTube video.
-  Future<void> _ensureAudioSession() async {
-    if (_sessionConfigured) return;
-    try {
-      final session = await AudioSession.instance;
-      await session.configure(AudioSessionConfiguration(
-        avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
-        avAudioSessionCategoryOptions:
-            AVAudioSessionCategoryOptions.defaultToSpeaker |
-            AVAudioSessionCategoryOptions.mixWithOthers,
-        androidAudioAttributes: const AndroidAudioAttributes(
-          contentType: AndroidAudioContentType.music,
-          usage: AndroidAudioUsage.media,
-        ),
-        androidWillPauseWhenDucked: false,
-      ));
-      _sessionConfigured = true;
-      debugPrint('MicCapture: audio session configured');
-    } catch (e) {
-      debugPrint('MicCapture: audio session failed: $e');
-    }
-  }
 
   Future<bool> start() async {
     if (_isRecording) return true;
@@ -49,9 +24,6 @@ class MicCaptureService {
       debugPrint('MicCapture: no microphone permission');
       return false;
     }
-
-    // Configure audio session to allow simultaneous playback + recording.
-    await _ensureAudioSession();
 
     try {
       final stream = await _recorder.startStream(

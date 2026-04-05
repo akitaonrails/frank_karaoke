@@ -194,6 +194,10 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
       _scoringSession = null;
     }
 
+    // Resume video if mic capture stole audio focus and paused it.
+    await Future.delayed(const Duration(milliseconds: 500));
+    _runJs('''(function(){var v=document.querySelector('video');if(v&&v.paused)v.play();})();''');
+
     // Inject overlay
     final title = ref.read(currentVideoTitleProvider) ?? '';
     final pitchShift = ref.read(pitchShiftProvider);
