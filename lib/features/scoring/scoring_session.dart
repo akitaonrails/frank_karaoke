@@ -236,20 +236,12 @@ class ScoringSession {
       stabilityScore = (1.0 - (math.sqrt(variance) / 3.0)).clamp(0.0, 1.0);
     }
 
-    // --- Dynamics (10%) ---
-    double dynamicsScore = 0.5;
-    if (_recentRms.length >= 10) {
-      final meanRms = _recentRms.reduce((a, b) => a + b) / _recentRms.length;
-      final rmsVar = _recentRms
-          .map((r) => (r - meanRms) * (r - meanRms))
-          .reduce((a, b) => a + b) / _recentRms.length;
-      dynamicsScore = math.sqrt(rmsVar) > 0.003 ? 0.8 : 0.5;
-    }
-
     // --- Composite ---
-    var frameScore = primaryScore * 0.60
-        + stabilityScore * 0.30
-        + dynamicsScore * 0.10;
+    // Primary score dominates (90%). Stability is a small bonus/penalty.
+    // This ensures the score swings with the primary dimension, not
+    // averaging out to ~50% from secondary anchor values.
+    var frameScore = primaryScore * 0.90
+        + stabilityScore * 0.10;
 
     // Streak mode: combo system
     if (_mode == ScoringMode.streak) {
