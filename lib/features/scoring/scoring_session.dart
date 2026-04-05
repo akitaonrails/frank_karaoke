@@ -187,8 +187,13 @@ class ScoringSession {
     }
     _silentFrames = 0;
 
+    // Require a strong enough signal to be actual singing, not just
+    // ambient noise that passed the gate. Singing RMS is typically > 0.05.
+    // This prevents the score from starting at 70 from room noise.
+    final isSinging = rms > 0.04;
+
     final pitchHz = _pitchDetector.detectPitch(samples);
-    if (pitchHz < 60) {
+    if (pitchHz < 60 || !isSinging) {
       // Unpitched noise while mic is active — this DOES break streak
       // (you're making sound but it's not singing)
       if (_mode == ScoringMode.streak) _streakCount = 0;
@@ -218,7 +223,7 @@ class ScoringSession {
     // --- Stability (30%) ---
     _recentPitches.add(singerMidi);
     if (_recentPitches.length > _stabilityWindowSize) _recentPitches.removeAt(0);
-    double stabilityScore = 0.7;
+    double stabilityScore = 0.4;
     if (_recentPitches.length >= 3) {
       final mean = _recentPitches.reduce((a, b) => a + b) / _recentPitches.length;
       final variance = _recentPitches
@@ -228,7 +233,7 @@ class ScoringSession {
     }
 
     // --- Dynamics (10%) ---
-    double dynamicsScore = 0.7;
+    double dynamicsScore = 0.5;
     if (_recentRms.length >= 10) {
       final meanRms = _recentRms.reduce((a, b) => a + b) / _recentRms.length;
       final rmsVar = _recentRms
@@ -389,7 +394,7 @@ class ScoringSession {
 
   /// Interval: compare the pitch JUMP between consecutive frames.
   double _scoreInterval(double singerMidi, double refMidi) {
-    if (_prevSingerPitch <= 0) return 0.7; // first note, be generous
+    if (_prevSingerPitch <= 0) return 0.4; // first note, neutral
 
     final singerInterval = singerMidi - hzToMidi(_prevSingerPitch);
 
