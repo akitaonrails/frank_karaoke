@@ -167,23 +167,30 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
     }
 
     // Build pitch oracle: download + decode reference audio.
-    final oracle = ref.read(pitchOracleProvider);
-    final streamInfo = await audioService.getAudioStreamInfo(videoId);
-    if (streamInfo != null) {
-      // Pause video and show processing overlay.
-      _runJs('''(function(){var v=document.querySelector('video');if(v)v.pause();})();''');
-      _runJs(WebviewOverlay.processingOverlayJs(true,
-          message: 'Analyzing "${title ?? "song"}"...'));
+    try {
+      final oracle = ref.read(pitchOracleProvider);
+      final streamInfo = await audioService.getAudioStreamInfo(videoId);
+      if (streamInfo != null && mounted) {
+        _runJs('''(function(){var v=document.querySelector('video');if(v)v.pause();})();''');
+        _runJs(WebviewOverlay.processingOverlayJs(true,
+            message: 'Analyzing song...'));
 
-      final built = await oracle.buildForVideo(videoId, streamInfo.url.toString());
-      debugPrint('PitchOracle: ${built ? "ready" : "failed"}');
+        final built = await oracle.buildForVideo(videoId, streamInfo.url.toString());
+        debugPrint('PitchOracle: ${built ? "ready (${oracle.entryCount} entries)" : "failed"}');
 
-      // Remove processing overlay and resume video.
+        if (mounted) {
+          _runJs(WebviewOverlay.processingOverlayJs(false));
+          _runJs('''(function(){var v=document.querySelector('video');if(v){v.currentTime=0;v.play();}})();''');
+        }
+      } else {
+        debugPrint('PitchOracle: no stream info available');
+      }
+    } catch (e) {
+      debugPrint('PitchOracle: error: $e');
       _runJs(WebviewOverlay.processingOverlayJs(false));
-      _runJs('''(function(){var v=document.querySelector('video');if(v){v.currentTime=0;v.play();}})();''');
     }
 
-    _startScoring();
+    if (mounted) _startScoring();
   }
 
   // --- Scoring ---
