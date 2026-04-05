@@ -85,7 +85,7 @@ class ScoringSession {
         _voiceIsolator = VoiceIsolator(preset: preset),
         _bandpass = BandpassFilter(),
         _noiseGateThreshold = calibratedNoiseGate ?? preset.noiseGateThreshold,
-        _singingThreshold = calibratedSingingThreshold ?? 0.0005;
+        _singingThreshold = calibratedSingingThreshold ?? 0.02;
 
   Stream<ScoringUpdate> get scoreStream => _scoreController.stream;
   bool get isActive => _isActive;
@@ -204,7 +204,7 @@ class ScoringSession {
 
     // Pitch detection
     final result = _pitchDetector.detectPitchWithConfidence(samples);
-    if (result.pitchHz < 60 || result.confidence < 0.1) {
+    if (result.pitchHz < 60 || result.confidence < 0.3) {
       if (_mode == ScoringMode.streak) _streakCount = 0;
       if (shouldLog) {
         debugPrint('  -> NOPITCH hz=${result.pitchHz.toStringAsFixed(0)} '
