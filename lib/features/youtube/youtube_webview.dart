@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:youtube_explode_dart/youtube_explode_dart.dart' show AudioStreamInfo;
 
 import '../../core/audio_preset.dart';
 import '../../core/constants.dart';
@@ -166,23 +167,23 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
       _runJs(YouTubeSyncService.muteVideoJs);
     }
 
-    // Start scoring immediately — don't wait for oracle.
+    // Get audio stream info once — used for both oracle and future reference.
+    final streamInfo = await audioService.getAudioStreamInfo(videoId);
+
+    // Start scoring immediately — oracle loads in background.
     if (mounted) _startScoring();
 
-    // Build pitch oracle in the background while user sings.
-    // Once ready, the scoring session will use it automatically.
-    _buildOracleInBackground(videoId);
+    // Build pitch oracle in the background.
+    if (streamInfo != null) {
+      _buildOracleInBackground(videoId, streamInfo);
+    } else {
+      debugPrint('PitchOracle: no stream info for $videoId');
+    }
   }
 
-  Future<void> _buildOracleInBackground(String videoId) async {
+  Future<void> _buildOracleInBackground(String videoId, AudioStreamInfo streamInfo) async {
     try {
-      final audioService = ref.read(youtubeAudioServiceProvider);
       final oracle = ref.read(pitchOracleProvider);
-      final streamInfo = await audioService.getAudioStreamInfo(videoId);
-      if (streamInfo == null) {
-        debugPrint('PitchOracle: no stream info');
-        return;
-      }
 
       _runJs(WebviewOverlay.processingOverlayJs(true,
           message: 'Loading song data...'));
@@ -192,7 +193,6 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
 
       if (mounted) {
         _runJs(WebviewOverlay.processingOverlayJs(false));
-        // If oracle is ready, reconnect the scoring session to use it.
         if (built && _scoringSession != null) {
           _scoringSession!.setOracle(oracle);
         }
