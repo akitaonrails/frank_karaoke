@@ -6,21 +6,22 @@ import 'package:flutter/foundation.dart';
 import '../../core/audio_preset.dart';
 import '../audio/mic_capture_service.dart';
 import '../audio/pitch_detector.dart';
+import '../audio/reference_audio_analyzer.dart';
 import '../audio/voice_isolator.dart';
 import 'scoring_engine.dart';
 
-/// Karaoke scoring with voice isolation and rolling-window responsiveness.
+/// Karaoke scoring with reference pitch comparison.
 ///
-/// The score reflects the singer's CURRENT performance (last ~15 seconds),
-/// not a stale average of the entire song. Good singing immediately raises
-/// the score; bad singing immediately drops it.
+/// Two modes:
+/// - **With reference** (Linux via ffmpeg, Android via just_audio):
+///   Compares singer's pitch against the instrumental's dominant pitch.
+///   Octave-agnostic — singing in any octave counts.
+///   Score = how close your pitch class matches the reference.
+/// - **Without reference** (fallback):
+///   Scores vocal quality only (chromatic snap + stability).
 ///
-/// Scoring dimensions (Nakano 2006 / Tsai & Lee 2012):
-/// - Chromatic snap (50%): landing on musical notes cleanly
-/// - Pitch stability (35%): holding notes, not jumping erratically
-/// - Dynamics (15%): expressive volume variation
-///
-/// Presence is no longer a scored dimension — silence is simply skipped.
+/// The live score uses EMA for responsiveness.
+/// The final score averages the entire performance.
 class ScoringSession {
   final MicCaptureService _mic;
   final PitchDetector _pitchDetector;
@@ -31,26 +32,30 @@ class ScoringSession {
   final _scoreController = StreamController<ScoringUpdate>.broadcast();
   bool _isActive = false;
 
-  // Reference audio (from just_audio on Android, null on Linux)
+  // Reference pitch tracking.
+  // On Linux: fed by ReferenceAudioAnalyzer (ffmpeg decode + YIN).
+  // On Android: fed by just_audio PCM tap.
+  double _currentReferencePitchHz = 0;
+  bool _hasReference = false;
+  StreamSubscription<ReferencePitchFrame>? _refSub;
+
+  // Reference audio (raw PCM for voice isolation on Android)
   Float64List? _currentReferenceFrame;
 
-  // Exponential moving average for the live score.
-  // Alpha controls reactivity: higher = faster response, lower = more memory.
-  // 0.05 means each frame contributes ~5%, so it takes ~20 frames (~1 second)
-  // for a change to be fully reflected, but old history fades gradually.
+  // EMA for live score
   double _emaScore = 0;
   bool _emaInitialized = false;
   static const _emaAlpha = 0.05;
 
-  // Pitch stability: rolling window of recent MIDI values
+  // Pitch stability
   final List<double> _recentPitches = [];
   static const _stabilityWindowSize = 12;
 
-  // Dynamics: rolling RMS values
+  // Dynamics
   final List<double> _recentRms = [];
   static const _dynamicsWindowSize = 50;
 
-  // Track total voiced frames for the final end-of-song score
+  // Totals for final score
   int _totalVoicedFrames = 0;
   double _allTimeScoreSum = 0;
 
@@ -64,15 +69,13 @@ class ScoringSession {
 
   Stream<ScoringUpdate> get scoreStream => _scoreController.stream;
   bool get isActive => _isActive;
+  bool get hasReference => _hasReference;
 
-  /// Live score — exponential moving average that reacts quickly to
-  /// current singing but still carries accumulated history.
   int get currentScore {
     if (!_emaInitialized) return 0;
     return (_emaScore * 100).round().clamp(0, 100);
   }
 
-  /// Final score for end-of-song (average of entire performance).
   int get finalScore {
     if (_totalVoicedFrames == 0) return 0;
     return (_allTimeScoreSum / _totalVoicedFrames * 100).round().clamp(0, 100);
@@ -80,9 +83,26 @@ class ScoringSession {
 
   int get frameCount => _totalVoicedFrames;
 
+  /// Connect a ReferenceAudioAnalyzer (Linux: ffmpeg-based).
+  void connectReferenceAnalyzer(ReferenceAudioAnalyzer analyzer) {
+    _refSub?.cancel();
+    _hasReference = true;
+    _refSub = analyzer.pitchStream.listen((frame) {
+      _currentReferencePitchHz = frame.pitchHz;
+    });
+    debugPrint('ScoringSession: connected reference analyzer');
+  }
+
+  /// Feed a reference audio frame directly (Android: just_audio PCM).
   void feedReferenceFrame(Float64List samples) {
     _currentReferenceFrame = samples;
     _voiceIsolator.feedReference(samples);
+    // Also detect pitch from the reference for comparison.
+    final refPitch = _pitchDetector.detectPitch(samples);
+    if (refPitch > 60) {
+      _currentReferencePitchHz = refPitch;
+      _hasReference = true;
+    }
   }
 
   Future<bool> start() async {
@@ -105,7 +125,7 @@ class ScoringSession {
     _isActive = true;
 
     _micSub = _mic.pcmStream.listen(_onMicFrame);
-    debugPrint('ScoringSession: started');
+    debugPrint('ScoringSession: started (ref=${_hasReference ? "yes" : "no"})');
     return true;
   }
 
@@ -114,7 +134,6 @@ class ScoringSession {
   void _onMicFrame(Float64List rawSamples) {
     if (!_isActive) return;
 
-    // Voice isolation
     final samples = _voiceIsolator.process(
       rawSamples,
       referenceSamples: _currentReferenceFrame,
@@ -127,78 +146,86 @@ class ScoringSession {
 
     _processedFrames++;
 
-    // Noise gate: skip silently, don't dilute scores
+    // Noise gate
     if (rms < _noiseGateThreshold) {
       _scoreController.add(ScoringUpdate(
         singerPitchHz: 0,
+        referencePitchHz: _currentReferencePitchHz,
         noteName: '--',
-        chromaticSnapScore: 0,
+        pitchMatchScore: 0,
         stabilityScore: 0,
         frameScore: 0,
         totalScore: currentScore,
+        overallScore: finalScore,
         rmsEnergy: rms,
       ));
       return;
     }
 
-    // Pitch detection on cleaned signal
     final pitchHz = _pitchDetector.detectPitch(samples);
     if (pitchHz < 60) {
-      // Unpitched sound — skip, don't dilute the score window.
       _scoreController.add(ScoringUpdate(
         singerPitchHz: 0,
+        referencePitchHz: _currentReferencePitchHz,
         noteName: '--',
-        chromaticSnapScore: 0,
+        pitchMatchScore: 0,
         stabilityScore: 0,
         frameScore: 0,
         totalScore: currentScore,
+        overallScore: finalScore,
         rmsEnergy: rms,
       ));
       return;
     }
 
-    // --- Chromatic snap (60%) ---
-    // How close to the nearest musical note?
-    // Use a generous curve: anything within 30 cents scores 90%+.
-    // Only truly off-pitch singing (40+ cents) drops significantly.
-    final midi = hzToMidi(pitchHz);
-    final nearestNote = midi.roundToDouble();
-    final deviationCents = (midi - nearestNote).abs() * 100;
-    // Quadratic falloff: gentle near center, steep at edges
-    final normalizedDev = (deviationCents / 50.0).clamp(0.0, 1.0);
-    final snapScore = 1.0 - (normalizedDev * normalizedDev);
+    final singerMidi = hzToMidi(pitchHz);
+    final nearestNote = singerMidi.roundToDouble();
+
+    // --- Pitch match score (60%) ---
+    double pitchMatchScore;
+    if (_hasReference && _currentReferencePitchHz > 60) {
+      // Compare singer's pitch class against reference pitch class.
+      // Octave-agnostic: C3 vs C5 = perfect match.
+      final refMidi = hzToMidi(_currentReferencePitchHz);
+      final singerPitchClass = singerMidi % 12;
+      final refPitchClass = refMidi % 12;
+      // Distance in semitones around the circle (0-6)
+      var classDist = (singerPitchClass - refPitchClass).abs();
+      if (classDist > 6) classDist = 12 - classDist;
+      // Score: 0 semitones = 1.0, 3 semitones = 0.0
+      pitchMatchScore = (1.0 - classDist / 3.0).clamp(0.0, 1.0);
+    } else {
+      // Fallback: chromatic snap (how close to ANY note)
+      final deviationCents = (singerMidi - nearestNote).abs() * 100;
+      final normalizedDev = (deviationCents / 50.0).clamp(0.0, 1.0);
+      pitchMatchScore = 1.0 - (normalizedDev * normalizedDev);
+    }
 
     // --- Pitch stability (30%) ---
-    // How steady is the pitch? Low variance = holding a note = good.
-    _recentPitches.add(midi);
+    _recentPitches.add(singerMidi);
     if (_recentPitches.length > _stabilityWindowSize) _recentPitches.removeAt(0);
-    double stabilityScore = 0.7; // generous default before enough data
+    double stabilityScore = 0.7;
     if (_recentPitches.length >= 3) {
       final mean = _recentPitches.reduce((a, b) => a + b) / _recentPitches.length;
       final variance = _recentPitches
           .map((p) => (p - mean) * (p - mean))
           .reduce((a, b) => a + b) / _recentPitches.length;
       final stddev = math.sqrt(variance);
-      // Generous: stddev < 1 semitone = good. Only > 3 semitones = bad.
       stabilityScore = (1.0 - (stddev / 3.0)).clamp(0.0, 1.0);
     }
 
     // --- Dynamics (10%) ---
-    // Mostly a bonus — doesn't drag the score down much.
-    double dynamicsScore = 0.7; // generous default
+    double dynamicsScore = 0.7;
     if (_recentRms.length >= 10) {
       final meanRms = _recentRms.reduce((a, b) => a + b) / _recentRms.length;
       final rmsVariance = _recentRms
           .map((r) => (r - meanRms) * (r - meanRms))
           .reduce((a, b) => a + b) / _recentRms.length;
       final rmsStddev = math.sqrt(rmsVariance);
-      // Any reasonable variation scores well
       dynamicsScore = rmsStddev > 0.003 ? 0.8 : 0.5;
     }
 
-    // Composite — designed so decent singing scores 70-85%,
-    // good singing 85-95%, only terrible singing drops below 50%.
-    final frameScore = snapScore * 0.60
+    final frameScore = pitchMatchScore * 0.60
         + stabilityScore * 0.30
         + dynamicsScore * 0.10;
 
@@ -206,12 +233,12 @@ class ScoringSession {
 
     if (_processedFrames <= 5 || _processedFrames % 100 == 0) {
       debugPrint('Scoring: #$_processedFrames '
-          'snap=${snapScore.toStringAsFixed(2)} '
+          'match=${pitchMatchScore.toStringAsFixed(2)} '
           'stab=${stabilityScore.toStringAsFixed(2)} '
-          'dyn=${dynamicsScore.toStringAsFixed(2)} '
           'frame=${frameScore.toStringAsFixed(2)} '
-          'total=$currentScore '
-          'dev=${deviationCents.toStringAsFixed(0)}c');
+          'live=$currentScore overall=$finalScore '
+          'ref=${_currentReferencePitchHz.toStringAsFixed(0)}Hz '
+          'singer=${pitchHz.toStringAsFixed(0)}Hz');
     }
 
     // Note name
@@ -222,11 +249,13 @@ class ScoringSession {
 
     _scoreController.add(ScoringUpdate(
       singerPitchHz: pitchHz,
+      referencePitchHz: _currentReferencePitchHz,
       noteName: noteName,
-      chromaticSnapScore: snapScore,
+      pitchMatchScore: pitchMatchScore,
       stabilityScore: stabilityScore,
       frameScore: frameScore,
       totalScore: currentScore,
+      overallScore: finalScore,
       rmsEnergy: rms,
     ));
   }
@@ -246,8 +275,10 @@ class ScoringSession {
     _isActive = false;
     await _micSub?.cancel();
     _micSub = null;
+    await _refSub?.cancel();
+    _refSub = null;
     await _mic.stop();
-    debugPrint('ScoringSession: stopped, final score: $finalScore');
+    debugPrint('ScoringSession: stopped, final=$finalScore');
   }
 
   Future<void> dispose() async {
@@ -258,20 +289,24 @@ class ScoringSession {
 
 class ScoringUpdate {
   final double singerPitchHz;
+  final double referencePitchHz;
   final String noteName;
-  final double chromaticSnapScore;
+  final double pitchMatchScore;
   final double stabilityScore;
   final double frameScore;
   final int totalScore;
+  final int overallScore;
   final double rmsEnergy;
 
   const ScoringUpdate({
     required this.singerPitchHz,
+    required this.referencePitchHz,
     required this.noteName,
-    required this.chromaticSnapScore,
+    required this.pitchMatchScore,
     required this.stabilityScore,
     required this.frameScore,
     required this.totalScore,
+    required this.overallScore,
     required this.rmsEnergy,
   });
 }

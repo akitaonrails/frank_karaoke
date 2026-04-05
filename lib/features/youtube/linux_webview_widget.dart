@@ -3,10 +3,12 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/audio_preset.dart';
 import '../../core/constants.dart';
 import '../../state/providers.dart';
+import '../audio/reference_audio_analyzer.dart';
 import '../overlay/webview_overlay.dart';
 import '../scoring/scoring_session.dart';
 import 'linux_webview_controller.dart';
@@ -31,6 +33,7 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
 
   ScoringSession? _scoringSession;
   StreamSubscription<ScoringUpdate>? _scoreSub;
+  ReferenceAudioAnalyzer? _refAnalyzer;
   int _lastInjectedScore = -1;
   bool _overlayInjected = false;
   Timer? _videoEndTimer;
@@ -41,14 +44,30 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
     super.initState();
     _controller = LinuxWebViewController();
     _eventSub = _eventChannel.receiveBroadcastStream().listen(_onEvent);
+    _loadSavedPreset();
     WidgetsBinding.instance.addPostFrameCallback((_) => _createWebView());
+  }
+
+  Future<void> _loadSavedPreset() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString('audio_preset');
+    if (saved != null) {
+      final preset = AudioPreset.values.where((p) => p.name == saved).firstOrNull;
+      if (preset != null) {
+        ref.read(audioPresetProvider.notifier).state = preset;
+      }
+    }
+  }
+
+  Future<void> _savePreset(AudioPreset preset) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('audio_preset', preset.name);
   }
 
   Future<void> _createWebView() async {
     await _controller.create(url: widget.initialUrl);
     _created = true;
 
-    // Register JS handlers for inline controls.
     _controller.addJavaScriptHandler(
       handlerName: 'FrankPreset',
       callback: (args) => _onPresetChange(args.isNotEmpty ? args[0] : ''),
@@ -67,13 +86,12 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
     final preset = AudioPreset.values.where((p) => p.name == presetId).firstOrNull;
     if (preset == null) return;
     ref.read(audioPresetProvider.notifier).state = preset;
-    // Update the overlay button highlight.
+    _savePreset(preset);
     if (_created && _overlayInjected) {
       _controller.evaluateJavascript(
         source: WebviewOverlay.updatePresetJs(preset.name),
       );
     }
-    // Restart scoring with new preset.
     if (_scoringSession != null) {
       _restartScoring();
     }
@@ -101,7 +119,6 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       case 'onLoadStop':
         final url = data is Map ? data['url'] as String? : null;
         if (url != null) _onUrlChange(url);
-        // Clean up YouTube's UI on every page load.
         if (_created) {
           _controller.evaluateJavascript(source: _cleanYouTubeUiJs);
         }
@@ -118,7 +135,6 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
     }
   }
 
-  /// Hide YouTube's recommended sidebar, comments, and clutter.
   static const _cleanYouTubeUiJs = '''
     (function() {
       var style = document.createElement('style');
@@ -129,9 +145,6 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
         '#comments { display: none !important; }',
         '#related { display: none !important; }',
         'ytd-watch-next-secondary-results-renderer { display: none !important; }',
-        '#info-contents .ytd-watch-metadata { max-width: 100% !important; }',
-        '#below { max-width: 100% !important; }',
-        '#primary { max-width: 100% !important; }',
       ].join('\\n');
       document.head.appendChild(style);
     })();
@@ -156,6 +169,7 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
 
     ref.read(isAudioSyncingProvider.notifier).state = true;
 
+    // Get title and audio stream URL.
     final audioService = ref.read(youtubeAudioServiceProvider);
     final title = await audioService.getVideoTitle(videoId);
     if (mounted) {
@@ -175,18 +189,39 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       );
     }
 
-    _startScoring();
+    // Start reference audio analysis (ffmpeg decode + pitch detection).
+    final streamInfo = await audioService.getAudioStreamInfo(videoId);
+    String? refAudioUrl;
+    if (streamInfo != null) {
+      refAudioUrl = streamInfo.url.toString();
+    }
+
+    _startScoring(refAudioUrl: refAudioUrl);
   }
 
-  Future<void> _startScoring() async {
+  Future<void> _startScoring({String? refAudioUrl}) async {
     await _stopScoring();
 
     final mic = ref.read(micCaptureServiceProvider);
     final preset = ref.read(audioPresetProvider);
 
     _scoringSession = ScoringSession(mic: mic, preset: preset);
-    final started = await _scoringSession!.start();
 
+    // Start reference audio analyzer if we have a URL.
+    if (refAudioUrl != null) {
+      _refAnalyzer = ReferenceAudioAnalyzer();
+      final refStarted = await _refAnalyzer!.start(refAudioUrl);
+      if (refStarted) {
+        _scoringSession!.connectReferenceAnalyzer(_refAnalyzer!);
+        debugPrint('Scoring: reference audio analyzer connected');
+      } else {
+        debugPrint('Scoring: reference analyzer failed, using fallback');
+        await _refAnalyzer!.dispose();
+        _refAnalyzer = null;
+      }
+    }
+
+    final started = await _scoringSession!.start();
     if (!started) {
       debugPrint('Scoring: mic unavailable');
       _scoringSession = null;
@@ -195,7 +230,6 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
     if (_created) {
       final title = ref.read(currentVideoTitleProvider) ?? '';
       final pitchShift = ref.read(pitchShiftProvider);
-      debugPrint('Overlay: injecting for "$title"');
       try {
         await _controller.evaluateJavascript(
           source: WebviewOverlay.injectOverlayJs(
@@ -206,7 +240,6 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
         );
         _overlayInjected = true;
         _lastInjectedScore = -1;
-        debugPrint('Overlay: injected successfully');
       } catch (e) {
         debugPrint('Overlay: injection failed: $e');
       }
@@ -258,20 +291,17 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
   void _onScoreUpdate(ScoringUpdate update) {
     if (!_created || !_overlayInjected) return;
 
-    // Update both live and overall scores.
-    final liveScore = update.totalScore;
-    final overallScore = _scoringSession?.finalScore ?? liveScore;
-    if (liveScore != _lastInjectedScore) {
-      _lastInjectedScore = liveScore;
+    if (update.totalScore != _lastInjectedScore) {
+      _lastInjectedScore = update.totalScore;
       _controller.evaluateJavascript(
-        source: WebviewOverlay.updateScoreJs(liveScore, overallScore),
+        source: WebviewOverlay.updateScoreJs(
+          update.totalScore,
+          update.overallScore,
+        ),
       );
-      ref.read(currentScoreProvider.notifier).state = liveScore;
+      ref.read(currentScoreProvider.notifier).state = update.totalScore;
     }
 
-    // Normalize pitch using log scale for better visual distribution.
-    // Singing range ~100-800 Hz mapped with log scale so C3-C5 fills
-    // most of the canvas instead of being crammed at the bottom.
     final normalizedPitch = update.singerPitchHz > 0
         ? _logNormalize(update.singerPitchHz, 100, 800)
         : 0.0;
@@ -288,6 +318,12 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
     );
   }
 
+  double _logNormalize(double hz, double minHz, double maxHz) {
+    if (hz <= minHz) return 0;
+    if (hz >= maxHz) return 1;
+    return (math.log(hz / minHz) / math.log(maxHz / minHz)).clamp(0.0, 1.0);
+  }
+
   Future<void> _restartScoring() async {
     if (!_created) return;
     await _controller.evaluateJavascript(
@@ -298,8 +334,20 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
         })();
       ''',
     );
+
+    // Re-fetch audio URL for reference analyzer.
+    final videoId = ref.read(currentVideoIdProvider);
+    String? refAudioUrl;
+    if (videoId != null) {
+      final audioService = ref.read(youtubeAudioServiceProvider);
+      final streamInfo = await audioService.getAudioStreamInfo(videoId);
+      if (streamInfo != null) {
+        refAudioUrl = streamInfo.url.toString();
+      }
+    }
+
     await _stopScoring();
-    _startScoring();
+    _startScoring(refAudioUrl: refAudioUrl);
   }
 
   Future<void> _stopScoring() async {
@@ -313,20 +361,18 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       _scoringSession = null;
     }
 
+    if (_refAnalyzer != null) {
+      await _refAnalyzer!.stop();
+      await _refAnalyzer!.dispose();
+      _refAnalyzer = null;
+    }
+
     if (_created && _overlayInjected) {
       await _controller.evaluateJavascript(
         source: WebviewOverlay.removeOverlayJs,
       );
       _overlayInjected = false;
     }
-  }
-
-  /// Log-scale normalization: maps [minHz, maxHz] to [0, 1] using log scale.
-  /// This spreads the singing range (C3-C5) across the full canvas height.
-  double _logNormalize(double hz, double minHz, double maxHz) {
-    if (hz <= minHz) return 0;
-    if (hz >= maxHz) return 1;
-    return (math.log(hz / minHz) / math.log(maxHz / minHz)).clamp(0.0, 1.0);
   }
 
   void _reinjectOverlay() {
