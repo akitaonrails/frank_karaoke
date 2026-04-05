@@ -48,7 +48,7 @@ class WebviewOverlay {
             + 'Streak \\u2014 party mode with combo multipliers!'
         },
         {
-          icon: '\\u2699',
+          icon: '\\u{1F527}',
           title: 'Settings (gear icon, top-left)',
           text: 'Mic preset, scoring mode, pitch shift, and mic calibration. '
             + 'Calibrate first! It listens to your room for 3 seconds to set '
