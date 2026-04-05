@@ -83,7 +83,7 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
       ..addJavaScriptChannel('FrankRestart', onMessageReceived: (_) => _restartScoring())
       ..addJavaScriptChannel('FrankCalibrate', onMessageReceived: (_) => _calibrateMic())
       ..addJavaScriptChannel('FrankDismissWelcome', onMessageReceived: (_) => _dismissWelcome())
-      ..loadRequest(Uri.parse(kYouTubeMobileUrl));
+      ..loadRequest(Uri.parse(kYouTubeDesktopUrl));
   }
 
   void _onPageLoaded() {
