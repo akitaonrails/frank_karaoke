@@ -1,8 +1,10 @@
+import '../../core/logo_assets.dart';
+
 /// JavaScript overlay injected into the YouTube webview.
 /// Uses DOM createElement for YouTube's Trusted Types CSP.
 class WebviewOverlay {
   /// Welcome screen shown on first launch.
-  static const welcomeOverlayJs = '''
+  static String get welcomeOverlayJs => '''
     (function() {
       if (document.getElementById('fk-welcome')) return;
 
@@ -19,12 +21,10 @@ class WebviewOverlay {
         + 'border:1px solid rgba(108,92,231,0.4);'
         + 'box-shadow:0 8px 60px rgba(108,92,231,0.3);';
 
-      var title = document.createElement('div');
-      title.style.cssText = 'font-size:32px;font-weight:800;margin-bottom:8px;'
-        + 'background:linear-gradient(135deg,#6c5ce7,#00d2ff);'
-        + '-webkit-background-clip:text;-webkit-text-fill-color:transparent;';
-      title.textContent = 'Frank Karaoke';
-      card.appendChild(title);
+      var titleImg = document.createElement('img');
+      titleImg.src = 'data:image/png;base64,$kLogoDarkBase64';
+      titleImg.style.cssText = 'height:36px;object-fit:contain;margin-bottom:8px;';
+      card.appendChild(titleImg);
 
       var sub = document.createElement('div');
       sub.style.cssText = 'font-size:15px;color:rgba(255,255,255,0.5);margin-bottom:24px;';

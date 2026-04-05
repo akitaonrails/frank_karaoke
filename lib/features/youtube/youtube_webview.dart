@@ -9,6 +9,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart' show AudioStreamInfo;
 
 import '../../core/audio_preset.dart';
+import '../../core/logo_assets.dart';
 import '../../core/constants.dart';
 import '../../core/scoring_mode.dart';
 import '../../state/providers.dart';
@@ -91,6 +92,7 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
     setState(() => _isReady = true);
     _injectBridge();
     _runJs(_cleanYouTubeUiJs);
+    _runJs(_replaceLogoJs);
     // Block auto-play: intercept the video element whenever it appears.
     // YouTube dynamically creates/replaces video elements, so we use
     // MutationObserver to catch them all. Every video gets a play listener
@@ -177,6 +179,55 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
         + 'ytm-promoted-sparkles-web-renderer{display:none!important}'
         + '.c3-module-companion{display:none!important}';
       document.head.appendChild(s);
+    })();
+  ''';
+
+  static String get _replaceLogoJs => '''
+    (function() {
+      var logoDataUri = 'data:image/png;base64,$kLogoDarkBase64';
+      function replaceLogo() {
+        if (document.querySelector('img.fk-logo')) return;
+        // Find YouTube's logo — it's typically an SVG or yt-icon inside
+        // a link in the header/masthead area.
+        var header = document.querySelector('header, #masthead-container, #masthead, ytd-masthead, ytm-mobile-topbar-renderer');
+        if (!header) return;
+        // Look for the logo link (usually first link in header).
+        var logoLink = header.querySelector('a[href="/"], ytd-topbar-logo-renderer a, .topbar-logo-renderer a');
+        if (!logoLink) {
+          // Fallback: first link in header.
+          logoLink = header.querySelector('a');
+        }
+        if (!logoLink) return;
+        // Hide original logo content.
+        logoLink.querySelectorAll('svg, yt-icon, ytd-logo, img:not(.fk-logo), span').forEach(function(el) {
+          el.style.cssText = 'display:none!important';
+        });
+        // Insert our logo.
+        var img = document.createElement('img');
+        img.className = 'fk-logo';
+        img.src = logoDataUri;
+        img.style.cssText = 'height:22px;object-fit:contain;display:inline-block;vertical-align:middle;';
+        logoLink.prepend(img);
+      }
+      replaceLogo();
+      setTimeout(replaceLogo, 1000);
+      setTimeout(replaceLogo, 3000);
+      setTimeout(replaceLogo, 6000);
+
+      // Hide "Open App" / "Open" button in YouTube's top bar.
+      function hideOpenApp() {
+        var header = document.querySelector('header, #masthead, ytm-mobile-topbar-renderer');
+        if (!header) return;
+        header.querySelectorAll('a, button').forEach(function(el) {
+          var t = (el.textContent || '').trim();
+          if (/^(open|open app|get app|use app)\$/i.test(t)) {
+            el.style.display = 'none';
+          }
+        });
+      }
+      hideOpenApp();
+      setTimeout(hideOpenApp, 2000);
+      setTimeout(hideOpenApp, 5000);
     })();
   ''';
 
