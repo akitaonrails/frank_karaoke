@@ -46,13 +46,11 @@ jobs:
             echo "Android keystore not configured, will use debug signing"
             exit 0
           fi
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/keystore.jks
-          cat > android/key.properties << PROPS
-          storePassword=$ANDROID_KEYSTORE_PASSWORD
-          keyPassword=$ANDROID_KEY_PASSWORD
-          keyAlias=$ANDROID_KEY_ALIAS
-          storeFile=keystore.jks
-          PROPS
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/keystore.jks
+          echo "storePassword=$ANDROID_KEYSTORE_PASSWORD" > android/key.properties
+          echo "keyPassword=$ANDROID_KEY_PASSWORD" >> android/key.properties
+          echo "keyAlias=$ANDROID_KEY_ALIAS" >> android/key.properties
+          echo "storeFile=keystore.jks" >> android/key.properties
 
       - name: Get dependencies
         run: flutter pub get
