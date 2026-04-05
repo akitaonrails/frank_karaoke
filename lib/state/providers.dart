@@ -3,6 +3,7 @@ import '../core/audio_preset.dart';
 import '../core/scoring_mode.dart';
 import '../features/audio/audio_player_service.dart';
 import '../features/audio/mic_capture_service.dart';
+import '../features/audio/pitch_oracle.dart';
 import '../features/youtube/youtube_audio_service.dart';
 import '../features/youtube/youtube_sync_service.dart';
 
@@ -43,6 +44,10 @@ final micCaptureServiceProvider = Provider<MicCaptureService>((ref) {
   final service = MicCaptureService();
   ref.onDispose(service.dispose);
   return service;
+});
+
+final pitchOracleProvider = Provider<PitchOracle>((ref) {
+  return PitchOracle();
 });
 
 final syncServiceProvider = Provider<YouTubeSyncService>((ref) {

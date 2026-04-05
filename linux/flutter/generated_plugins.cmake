@@ -3,6 +3,7 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  audio_decoder
   record_linux
   sqlite3_flutter_libs
 )

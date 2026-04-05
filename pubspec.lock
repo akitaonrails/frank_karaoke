@@ -49,6 +49,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.13.1"
+  audio_decoder:
+    dependency: "direct main"
+    description:
+      name: audio_decoder
+      sha256: "0aab41fda86a9da807e76c4291ca28febf285cd19057df60abee4b83c2781dc6"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.7.4"
   audio_session:
     dependency: transitive
     description:
@@ -369,7 +377,7 @@ packages:
     source: hosted
     version: "0.15.6"
   http:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: http
       sha256: "87721a4a50b19c7f1d49001e51409bddc46303966ce89a65af4f4e6004896412"

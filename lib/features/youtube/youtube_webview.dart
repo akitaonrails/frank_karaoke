@@ -162,9 +162,25 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
       ref.read(isVideoPlayingProvider.notifier).state = true;
     }
 
-    // On Android, mute webview and use just_audio for reference PCM.
     if (syncService.shouldMuteWebview) {
       _runJs(YouTubeSyncService.muteVideoJs);
+    }
+
+    // Build pitch oracle: download + decode reference audio.
+    final oracle = ref.read(pitchOracleProvider);
+    final streamInfo = await audioService.getAudioStreamInfo(videoId);
+    if (streamInfo != null) {
+      // Pause video and show processing overlay.
+      _runJs('''(function(){var v=document.querySelector('video');if(v)v.pause();})();''');
+      _runJs(WebviewOverlay.processingOverlayJs(true,
+          message: 'Analyzing "${title ?? "song"}"...'));
+
+      final built = await oracle.buildForVideo(videoId, streamInfo.url.toString());
+      debugPrint('PitchOracle: ${built ? "ready" : "failed"}');
+
+      // Remove processing overlay and resume video.
+      _runJs(WebviewOverlay.processingOverlayJs(false));
+      _runJs('''(function(){var v=document.querySelector('video');if(v){v.currentTime=0;v.play();}})();''');
     }
 
     _startScoring();
@@ -181,10 +197,12 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
     final calGate = ref.read(calibratedNoiseGateProvider);
     final calSinging = ref.read(calibratedSingingThresholdProvider);
 
+    final oracle = ref.read(pitchOracleProvider);
     _scoringSession = ScoringSession(
       mic: mic,
       preset: preset,
       mode: mode,
+      oracle: oracle.isReady ? oracle : null,
       calibratedNoiseGate: calGate,
       calibratedSingingThreshold: calSinging,
     );

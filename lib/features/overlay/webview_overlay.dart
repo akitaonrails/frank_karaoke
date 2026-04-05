@@ -756,6 +756,40 @@ class WebviewOverlay {
     (function(){var el=document.getElementById('fk-singer');if(el)el.textContent='$name';})();
   ''';
 
+  /// Processing overlay — shown while reference audio is being analyzed.
+  static String processingOverlayJs(bool show, {String message = 'Analyzing audio...'}) => '''
+    (function() {
+      var el = document.getElementById('fk-processing');
+      if ($show) {
+        if (el) return;
+        var d = document.createElement('div');
+        d.id = 'fk-processing';
+        d.style.cssText = 'position:fixed;inset:0;z-index:999998;'
+          + 'background:rgba(0,0,0,0.75);display:flex;flex-direction:column;'
+          + 'align-items:center;justify-content:center;'
+          + 'font-family:system-ui,sans-serif;pointer-events:auto;';
+        var spinner = document.createElement('div');
+        spinner.style.cssText = 'width:44px;height:44px;border:3px solid rgba(255,255,255,0.15);'
+          + 'border-top-color:#00d2ff;border-radius:50%;animation:fkSpin 0.8s linear infinite;';
+        d.appendChild(spinner);
+        var msg = document.createElement('div');
+        msg.style.cssText = 'color:rgba(255,255,255,0.7);font-size:15px;margin-top:16px;font-weight:500;';
+        msg.textContent = '$message';
+        d.appendChild(msg);
+        var sub = document.createElement('div');
+        sub.style.cssText = 'color:rgba(255,255,255,0.35);font-size:12px;margin-top:6px;';
+        sub.textContent = 'First time takes a moment';
+        d.appendChild(sub);
+        var style = document.createElement('style');
+        style.textContent = '@keyframes fkSpin{to{transform:rotate(360deg)}}';
+        d.appendChild(style);
+        document.body.appendChild(d);
+      } else {
+        if (el) el.remove();
+      }
+    })();
+  ''';
+
   static const removeOverlayJs = '''
     (function() {
       var el=document.getElementById('fk-overlay');if(el)el.remove();

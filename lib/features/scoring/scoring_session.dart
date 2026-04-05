@@ -7,6 +7,7 @@ import '../../core/audio_preset.dart';
 import '../../core/scoring_mode.dart';
 import '../audio/bandpass_filter.dart';
 import '../audio/mic_capture_service.dart';
+import '../audio/pitch_oracle.dart';
 import '../audio/pitch_detector.dart';
 import '../audio/voice_isolator.dart';
 import 'scoring_engine.dart';
@@ -23,6 +24,7 @@ class ScoringSession {
   final PitchDetector _pitchDetector;
   final VoiceIsolator _voiceIsolator;
   final BandpassFilter _bandpass;
+  final PitchOracle? _oracle;
   final double _noiseGateThreshold;
   final double _singingThreshold;
   final ScoringMode _mode;
@@ -62,6 +64,9 @@ class ScoringSession {
   // Silence gap
   int _silentFrames = 0;
 
+  // Playback time tracking for pitch oracle
+  DateTime? _playbackStartTime;
+
   // Totals for final score
   int _totalVoicedFrames = 0;
   double _allTimeScoreSum = 0;
@@ -70,9 +75,11 @@ class ScoringSession {
     required MicCaptureService mic,
     required AudioPreset preset,
     required ScoringMode mode,
+    PitchOracle? oracle,
     double? calibratedNoiseGate,
     double? calibratedSingingThreshold,
   })  : _mic = mic,
+        _oracle = oracle,
         _mode = mode,
         _pitchDetector = PitchDetector(),
         _voiceIsolator = VoiceIsolator(preset: preset),
@@ -131,6 +138,7 @@ class ScoringSession {
     _bandpass.reset();
     _isActive = true;
     _processedFrames = 0;
+    _playbackStartTime = DateTime.now();
 
     _micSub = _mic.pcmStream.listen((frame) => _onMicFrame(frame.samples, frame.rawPeak));
     debugPrint('ScoringSession: started mode=${_mode.name} '
@@ -208,12 +216,37 @@ class ScoringSession {
     _recentPitches.add(singerMidi);
     if (_recentPitches.length > _historySize) _recentPitches.removeAt(0);
 
+    // Pitch oracle: determine if this is the singer or speaker bleed.
+    double singerConf = 1.0; // assume singer unless oracle says otherwise
+    if (_oracle != null && _oracle.isReady && _playbackStartTime != null) {
+      final elapsed = DateTime.now().difference(_playbackStartTime!);
+      singerConf = _oracle.singerConfidence(pitchHz, elapsed);
+      final refPitch = _oracle.getPitchAt(elapsed);
+
+      // If the oracle says this is speaker bleed, skip it.
+      if (singerConf < 0.3) {
+        if (shouldLog) {
+          debugPrint('  -> BLEED singerConf=${singerConf.toStringAsFixed(2)} '
+              'ref=${refPitch.toStringAsFixed(0)}Hz');
+        }
+        _emit(0, 0, '--', 0, confidence, 0, rms);
+        return;
+      }
+
+      // If oracle has reference, use reference-based scoring.
+      if (refPitch > 60) {
+        _hasReference = true;
+        _currentReferencePitchHz = refPitch;
+      }
+    }
+
     // Compute score
     final primaryScore = _hasReference
         ? _scoreWithReference(singerMidi, pitchHz)
         : _scoreVoiceOnly(singerMidi, pitchHz, confidence);
 
-    var frameScore = primaryScore;
+    // Scale by singer confidence: partial bleed gets partial score.
+    var frameScore = primaryScore * singerConf;
 
     // Streak combo
     if (_mode == ScoringMode.streak) {

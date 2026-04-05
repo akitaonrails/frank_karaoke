@@ -7,8 +7,10 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      body: YouTubeWebView(),
+    return Scaffold(
+      body: SafeArea(
+        child: const YouTubeWebView(),
+      ),
     );
   }
 }
