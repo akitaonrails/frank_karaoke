@@ -99,9 +99,8 @@ class WebviewOverlay {
       dontShow.addEventListener('mouseleave', function() { dontShow.style.color = 'rgba(255,255,255,0.4)'; });
       dontShow.addEventListener('click', function(e) {
         e.stopPropagation(); e.preventDefault();
-        if (window.webkit && window.webkit.messageHandlers &&
-            window.webkit.messageHandlers.FrankDismissWelcome) {
-          window.webkit.messageHandlers.FrankDismissWelcome.postMessage('permanent');
+        if (window.FrankDismissWelcome) {
+          FrankDismissWelcome.postMessage('permanent');
         }
         bg.style.animation = 'fkFadeIn 0.3s ease-out reverse';
         setTimeout(function() { if (bg.parentNode) bg.remove(); }, 300);
@@ -325,9 +324,8 @@ class WebviewOverlay {
         btn.addEventListener('click', (function(pid) {
           return function(e) {
             e.stopPropagation(); e.preventDefault();
-            if (window.webkit && window.webkit.messageHandlers &&
-                window.webkit.messageHandlers.FrankPreset) {
-              window.webkit.messageHandlers.FrankPreset.postMessage(pid);
+            if (window.FrankPreset) {
+              FrankPreset.postMessage(pid);
             }
           };
         })(p.id), true);
@@ -361,9 +359,8 @@ class WebviewOverlay {
           + 'user-select:none;-webkit-user-select:none;transition:background 0.2s;';
         b.addEventListener('click', function(e) {
           e.stopPropagation(); e.preventDefault();
-          if (window.webkit && window.webkit.messageHandlers &&
-              window.webkit.messageHandlers.FrankPitch) {
-            window.webkit.messageHandlers.FrankPitch.postMessage(dir);
+          if (window.FrankPitch) {
+            FrankPitch.postMessage(dir);
           }
         }, true);
         b.addEventListener('mousedown', function(e){ e.stopPropagation(); }, true);
@@ -429,9 +426,8 @@ class WebviewOverlay {
         btn.addEventListener('click', (function(mid) {
           return function(e) {
             e.stopPropagation(); e.preventDefault();
-            if (window.webkit && window.webkit.messageHandlers &&
-                window.webkit.messageHandlers.FrankMode) {
-              window.webkit.messageHandlers.FrankMode.postMessage(mid);
+            if (window.FrankMode) {
+              FrankMode.postMessage(mid);
             }
           };
         })(m.id), true);
@@ -455,9 +451,8 @@ class WebviewOverlay {
       });
       restartBtn.addEventListener('click', function(e) {
         e.stopPropagation(); e.preventDefault();
-        if (window.webkit && window.webkit.messageHandlers &&
-            window.webkit.messageHandlers.FrankRestart) {
-          window.webkit.messageHandlers.FrankRestart.postMessage('restart');
+        if (window.FrankRestart) {
+          FrankRestart.postMessage('restart');
         }
       }, true);
       restartBtn.addEventListener('mousedown', function(e){ e.stopPropagation(); }, true);
@@ -480,9 +475,8 @@ class WebviewOverlay {
       calBtn.addEventListener('click', function(e) {
         e.stopPropagation(); e.preventDefault();
         if (window._fkCalibrating) return;
-        if (window.webkit && window.webkit.messageHandlers &&
-            window.webkit.messageHandlers.FrankCalibrate) {
-          window.webkit.messageHandlers.FrankCalibrate.postMessage('start');
+        if (window.FrankCalibrate) {
+          FrankCalibrate.postMessage('start');
         }
       }, true);
       calBtn.addEventListener('mousedown', function(e){ e.stopPropagation(); }, true);

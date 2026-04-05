@@ -7,7 +7,6 @@ import '../../core/audio_preset.dart';
 import '../../core/scoring_mode.dart';
 import '../audio/mic_capture_service.dart';
 import '../audio/pitch_detector.dart';
-import '../audio/reference_audio_analyzer.dart';
 import '../audio/voice_isolator.dart';
 import 'scoring_engine.dart';
 
@@ -33,7 +32,6 @@ class ScoringSession {
   // Reference pitch (Android only)
   double _currentReferencePitchHz = 0;
   bool _hasReference = false;
-  StreamSubscription<ReferencePitchFrame>? _refSub;
   Float64List? _currentReferenceFrame;
 
   // EMA for live score
@@ -96,14 +94,7 @@ class ScoringSession {
 
   int get streakCount => _streakCount;
 
-  void connectReferenceAnalyzer(ReferenceAudioAnalyzer analyzer) {
-    _refSub?.cancel();
-    _hasReference = true;
-    _refSub = analyzer.pitchStream.listen((frame) {
-      _currentReferencePitchHz = frame.pitchHz;
-    });
-  }
-
+  /// Feed a reference audio frame (Android: from just_audio PCM tap).
   void feedReferenceFrame(Float64List samples) {
     _currentReferenceFrame = samples;
     _voiceIsolator.feedReference(samples);
@@ -387,8 +378,6 @@ class ScoringSession {
     _isActive = false;
     await _micSub?.cancel();
     _micSub = null;
-    await _refSub?.cancel();
-    _refSub = null;
     await _mic.stop();
     debugPrint('ScoringSession: stopped, final=$finalScore');
   }

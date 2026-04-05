@@ -1,12 +1,19 @@
-import 'dart:io' show Platform;
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+import '../../core/audio_preset.dart';
 import '../../core/constants.dart';
+import '../../core/scoring_mode.dart';
 import '../../state/providers.dart';
+import '../overlay/webview_overlay.dart';
+import '../scoring/scoring_session.dart';
+import 'youtube_sync_service.dart';
 import 'youtube_url_parser.dart';
 
 class YouTubeWebView extends ConsumerStatefulWidget {
@@ -20,10 +27,44 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
   late final WebViewController _controller;
   bool _isReady = false;
 
+  ScoringSession? _scoringSession;
+  StreamSubscription<ScoringUpdate>? _scoreSub;
+  int _lastInjectedScore = -1;
+  bool _overlayInjected = false;
+  Timer? _videoEndTimer;
+  bool _celebrationShown = false;
+  bool _welcomeShown = false;
+  bool _welcomeDismissedPermanently = false;
+
   @override
   void initState() {
     super.initState();
+    _loadSavedSettings();
     _initWebView();
+  }
+
+  Future<void> _loadSavedSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedPreset = prefs.getString('audio_preset');
+    if (savedPreset != null) {
+      final preset = AudioPreset.values.where((p) => p.name == savedPreset).firstOrNull;
+      if (preset != null) ref.read(audioPresetProvider.notifier).state = preset;
+    }
+    final savedMode = prefs.getString('scoring_mode');
+    if (savedMode != null) {
+      final mode = ScoringMode.values.where((m) => m.name == savedMode).firstOrNull;
+      if (mode != null) ref.read(scoringModeProvider.notifier).state = mode;
+    }
+    _welcomeDismissedPermanently = prefs.getBool('welcome_dismissed') ?? false;
+    final savedGate = prefs.getDouble('calibrated_noise_gate');
+    if (savedGate != null) ref.read(calibratedNoiseGateProvider.notifier).state = savedGate;
+    final savedSinging = prefs.getDouble('calibrated_singing_threshold');
+    if (savedSinging != null) ref.read(calibratedSingingThresholdProvider.notifier).state = savedSinging;
+  }
+
+  Future<void> _saveSetting(String key, String value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(key, value);
   }
 
   void _initWebView() {
@@ -35,80 +76,345 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
           onUrlChange: (change) => _onUrlChange(change.url),
         ),
       )
-      ..addJavaScriptChannel(
-        'FrankKaraoke',
-        onMessageReceived: _onJsMessage,
-      )
-      ..loadRequest(Uri.parse(_youtubeUrl));
-  }
-
-  String get _youtubeUrl {
-    // Use mobile YouTube on Android for better touch UX,
-    // desktop YouTube on Linux for better mouse/keyboard UX
-    if (!kIsWeb && Platform.isAndroid) {
-      return kYouTubeMobileUrl;
-    }
-    return kYouTubeDesktopUrl;
+      ..addJavaScriptChannel('FrankKaraoke', onMessageReceived: _onJsMessage)
+      ..addJavaScriptChannel('FrankPreset', onMessageReceived: (m) => _onPresetChange(m.message))
+      ..addJavaScriptChannel('FrankMode', onMessageReceived: (m) => _onModeChange(m.message))
+      ..addJavaScriptChannel('FrankPitch', onMessageReceived: (m) => _onPitchChange(m.message))
+      ..addJavaScriptChannel('FrankRestart', onMessageReceived: (_) => _restartScoring())
+      ..addJavaScriptChannel('FrankCalibrate', onMessageReceived: (_) => _calibrateMic())
+      ..addJavaScriptChannel('FrankDismissWelcome', onMessageReceived: (_) => _dismissWelcome())
+      ..loadRequest(Uri.parse(kYouTubeMobileUrl));
   }
 
   void _onPageLoaded() {
     if (!mounted) return;
     setState(() => _isReady = true);
     _injectBridge();
+    _runJs(_cleanYouTubeUiJs);
+    if (!_welcomeShown && !_welcomeDismissedPermanently) {
+      _welcomeShown = true;
+      _runJs(WebviewOverlay.welcomeOverlayJs);
+    }
+    if (_overlayInjected) _reinjectOverlay();
   }
 
   void _injectBridge() {
-    _controller.runJavaScript('''
+    _runJs('''
       (function() {
-        // Monitor URL changes for video ID extraction
         let lastUrl = location.href;
         const observer = new MutationObserver(() => {
           if (location.href !== lastUrl) {
             lastUrl = location.href;
-            FrankKaraoke.postMessage(JSON.stringify({
-              type: 'urlChange',
-              url: lastUrl
-            }));
+            FrankKaraoke.postMessage(JSON.stringify({type:'urlChange',url:lastUrl}));
           }
         });
-        observer.observe(document.body, { childList: true, subtree: true });
-
-        // Monitor video element for play/pause
-        function watchVideo() {
-          const video = document.querySelector('video');
-          if (!video) {
-            setTimeout(watchVideo, 1000);
-            return;
-          }
-          video.addEventListener('play', () => {
-            FrankKaraoke.postMessage(JSON.stringify({
-              type: 'play',
-              currentTime: video.currentTime
-            }));
-          });
-          video.addEventListener('pause', () => {
-            FrankKaraoke.postMessage(JSON.stringify({
-              type: 'pause',
-              currentTime: video.currentTime
-            }));
-          });
-        }
-        watchVideo();
+        observer.observe(document.body, {childList:true,subtree:true});
       })();
     ''');
   }
 
+  static const _cleanYouTubeUiJs = '''
+    (function() {
+      if (document.getElementById('fk-yt-cleanup')) return;
+      var s = document.createElement('style');
+      s.id = 'fk-yt-cleanup';
+      s.textContent = '#secondary{display:none!important}'
+        + '#comments{display:none!important}'
+        + '#related{display:none!important}'
+        + 'ytd-watch-next-secondary-results-renderer{display:none!important}';
+      document.head.appendChild(s);
+    })();
+  ''';
+
   void _onUrlChange(String? url) {
     if (url == null) return;
     final videoId = extractVideoId(url);
-    if (videoId != null) {
+    final currentId = ref.read(currentVideoIdProvider);
+
+    if (videoId != null && videoId != currentId) {
       ref.read(currentVideoIdProvider.notifier).state = videoId;
+      _onVideoDetected(videoId);
+    } else if (videoId == null && currentId != null) {
+      ref.read(currentVideoIdProvider.notifier).state = null;
+      ref.read(isVideoPlayingProvider.notifier).state = false;
+      _stopScoring();
     }
   }
 
   void _onJsMessage(JavaScriptMessage message) {
-    // Will be expanded in Phase 2 for audio sync
-    debugPrint('JS Bridge: ${message.message}');
+    try {
+      final data = jsonDecode(message.message);
+      if (data is Map && data['type'] == 'urlChange') {
+        _onUrlChange(data['url'] as String?);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _onVideoDetected(String videoId) async {
+    final syncService = ref.read(syncServiceProvider);
+    ref.read(isAudioSyncingProvider.notifier).state = true;
+
+    final audioService = ref.read(youtubeAudioServiceProvider);
+    final title = await audioService.getVideoTitle(videoId);
+    if (mounted) ref.read(currentVideoTitleProvider.notifier).state = title;
+
+    await syncService.onVideoDetected(videoId);
+
+    if (mounted) {
+      ref.read(isAudioSyncingProvider.notifier).state = false;
+      ref.read(isVideoPlayingProvider.notifier).state = true;
+    }
+
+    // On Android, mute webview and use just_audio for reference PCM.
+    if (syncService.shouldMuteWebview) {
+      _runJs(YouTubeSyncService.muteVideoJs);
+    }
+
+    _startScoring();
+  }
+
+  // --- Scoring ---
+
+  Future<void> _startScoring() async {
+    await _stopScoring();
+
+    final mic = ref.read(micCaptureServiceProvider);
+    final preset = ref.read(audioPresetProvider);
+    final mode = ref.read(scoringModeProvider);
+    final calGate = ref.read(calibratedNoiseGateProvider);
+    final calSinging = ref.read(calibratedSingingThresholdProvider);
+
+    _scoringSession = ScoringSession(
+      mic: mic,
+      preset: preset,
+      mode: mode,
+      calibratedNoiseGate: calGate,
+      calibratedSingingThreshold: calSinging,
+    );
+
+    final started = await _scoringSession!.start();
+    if (!started) {
+      _scoringSession = null;
+    }
+
+    // Inject overlay
+    final title = ref.read(currentVideoTitleProvider) ?? '';
+    final pitchShift = ref.read(pitchShiftProvider);
+    try {
+      await _runJs(WebviewOverlay.injectOverlayJs(
+        singerName: title,
+        activePreset: preset.name,
+        activeScoringMode: mode.name,
+        pitchShift: pitchShift,
+      ));
+      _overlayInjected = true;
+      _lastInjectedScore = -1;
+      await _runJs(WebviewOverlay.updateScoreJs(0, 0));
+    } catch (e) {
+      debugPrint('Overlay: injection failed: $e');
+    }
+
+    ref.read(currentScoreProvider.notifier).state = 0;
+    _scoreSub = _scoringSession?.scoreStream.listen(_onScoreUpdate);
+
+    _celebrationShown = false;
+    _videoEndTimer?.cancel();
+    _videoEndTimer = Timer.periodic(const Duration(seconds: 2), (_) => _checkVideoEnd());
+  }
+
+  void _onScoreUpdate(ScoringUpdate update) {
+    if (!_overlayInjected) return;
+
+    if (update.totalScore != _lastInjectedScore ||
+        _scoringSession?.mode == ScoringMode.streak) {
+      _lastInjectedScore = update.totalScore;
+      _runJs(WebviewOverlay.updateScoreJs(
+        update.totalScore,
+        update.overallScore,
+        streakCount: update.streakCount,
+        modeName: _scoringSession?.mode.label ?? '',
+      ));
+      ref.read(currentScoreProvider.notifier).state = update.totalScore;
+    }
+
+    final normalizedPitch = update.singerPitchHz > 0
+        ? _logNormalize(update.singerPitchHz, 100, 800)
+        : 0.0;
+    _runJs(WebviewOverlay.updatePitchTrailJs(normalizedPitch, update.frameScore));
+
+    final normalizedRms = (update.rmsEnergy * 100).clamp(0.0, 1.0);
+    _runJs(WebviewOverlay.updateNoteAndRmsJs(update.noteName, normalizedRms));
+
+    _runJs(WebviewOverlay.updateDebugJs(
+      primaryScore: update.primaryScore,
+      confidence: update.confidence,
+      stability: update.stabilityScore,
+      frameScore: update.frameScore,
+      rms: update.rmsEnergy,
+      pitchHz: update.singerPitchHz,
+      streak: update.streakCount,
+    ));
+  }
+
+  Future<void> _stopScoring() async {
+    _videoEndTimer?.cancel();
+    _videoEndTimer = null;
+    await _scoreSub?.cancel();
+    _scoreSub = null;
+    if (_scoringSession != null) {
+      await _scoringSession!.stop();
+      _scoringSession = null;
+    }
+    if (_overlayInjected) {
+      _runJs(WebviewOverlay.removeOverlayJs);
+      _overlayInjected = false;
+    }
+  }
+
+  Future<void> _restartScoring() async {
+    _runJs('''(function(){var v=document.querySelector('video');if(v){v.currentTime=0;v.play();}})();''');
+    await _stopScoring();
+    _startScoring();
+  }
+
+  void _reinjectOverlay() {
+    if (!_overlayInjected) return;
+    final title = ref.read(currentVideoTitleProvider) ?? '';
+    final preset = ref.read(audioPresetProvider);
+    final mode = ref.read(scoringModeProvider);
+    final pitchShift = ref.read(pitchShiftProvider);
+    _runJs(WebviewOverlay.injectOverlayJs(
+      singerName: title,
+      activePreset: preset.name,
+      activeScoringMode: mode.name,
+      pitchShift: pitchShift,
+    ));
+  }
+
+  Future<void> _checkVideoEnd() async {
+    if (_celebrationShown) return;
+    try {
+      final result = await _controller.runJavaScriptReturningResult('''
+        (function(){var v=document.querySelector('video');
+        if(!v||!v.duration||v.duration===Infinity)return'-1';
+        return v.currentTime+'|'+v.duration;})();
+      ''');
+      final str = result is String ? result : result.toString();
+      if (str.contains('|')) {
+        final parts = str.replaceAll('"', '').split('|');
+        final current = double.tryParse(parts[0]) ?? 0;
+        final duration = double.tryParse(parts[1]) ?? 0;
+        if (duration > 30 && current > 10 && (duration - current) < 5) {
+          _celebrationShown = true;
+          _videoEndTimer?.cancel();
+          _runJs(WebviewOverlay.celebrationJs(
+            _scoringSession?.finalScore ?? _lastInjectedScore,
+          ));
+        }
+      }
+    } catch (_) {}
+  }
+
+  // --- Settings handlers ---
+
+  void _onPresetChange(String presetId) {
+    final preset = AudioPreset.values.where((p) => p.name == presetId).firstOrNull;
+    if (preset == null) return;
+    ref.read(audioPresetProvider.notifier).state = preset;
+    _saveSetting('audio_preset', preset.name);
+    if (_overlayInjected) _runJs(WebviewOverlay.updatePresetJs(preset.name));
+    if (_scoringSession != null) _restartScoring();
+  }
+
+  void _onModeChange(String modeId) {
+    final mode = ScoringMode.values.where((m) => m.name == modeId).firstOrNull;
+    if (mode == null) return;
+    ref.read(scoringModeProvider.notifier).state = mode;
+    _saveSetting('scoring_mode', mode.name);
+    if (_overlayInjected) _runJs(WebviewOverlay.updateModeJs(mode.name));
+    if (_scoringSession != null) _restartScoring();
+  }
+
+  void _onPitchChange(String direction) {
+    final current = ref.read(pitchShiftProvider);
+    final next = direction == 'up'
+        ? (current + 1).clamp(kPitchShiftMin, kPitchShiftMax)
+        : (current - 1).clamp(kPitchShiftMin, kPitchShiftMax);
+    ref.read(pitchShiftProvider.notifier).state = next;
+    if (_overlayInjected) _runJs(WebviewOverlay.updatePitchShiftJs(next));
+  }
+
+  Future<void> _calibrateMic() async {
+    _runJs(WebviewOverlay.updateCalibrateJs('\\u{1F399} Stay quiet... 3s', active: true));
+
+    final mic = ref.read(micCaptureServiceProvider);
+    final wasRecording = mic.isRecording;
+    if (!wasRecording) {
+      final started = await mic.start();
+      if (!started) {
+        _runJs(WebviewOverlay.updateCalibrateJs('\\u{274C} Mic unavailable'));
+        return;
+      }
+    }
+
+    final rmsValues = <double>[];
+    final sub = mic.pcmStream.listen((samples) {
+      double sum = 0;
+      for (final s in samples) { sum += s * s; }
+      rmsValues.add(sum > 0 ? math.sqrt(sum / samples.length) : 0.0);
+    });
+
+    for (var i = 2; i >= 0; i--) {
+      await Future.delayed(const Duration(seconds: 1));
+      if (i > 0) _runJs(WebviewOverlay.updateCalibrateJs('\\u{1F399} Stay quiet... ${i}s', active: true));
+    }
+
+    await sub.cancel();
+    if (!wasRecording) await mic.stop();
+
+    if (rmsValues.isEmpty) {
+      _runJs(WebviewOverlay.updateCalibrateJs('\\u{274C} No data'));
+      return;
+    }
+
+    rmsValues.sort();
+    final p90 = rmsValues[(rmsValues.length * 0.9).floor()];
+    final noiseGate = p90 * 2.0;
+    final singingThreshold = p90 * 4.0;
+
+    ref.read(calibratedNoiseGateProvider.notifier).state = noiseGate;
+    ref.read(calibratedSingingThresholdProvider.notifier).state = singingThreshold;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('calibrated_noise_gate', noiseGate);
+    await prefs.setDouble('calibrated_singing_threshold', singingThreshold);
+
+    _runJs(WebviewOverlay.updateCalibrateJs('\\u{2705} Calibrated'));
+    if (_scoringSession != null) _restartScoring();
+  }
+
+  Future<void> _dismissWelcome() async {
+    _welcomeDismissedPermanently = true;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('welcome_dismissed', true);
+  }
+
+  // --- Helpers ---
+
+  Future<void> _runJs(String source) {
+    return _controller.runJavaScript(source);
+  }
+
+  double _logNormalize(double hz, double minHz, double maxHz) {
+    if (hz <= minHz) return 0;
+    if (hz >= maxHz) return 1;
+    return (math.log(hz / minHz) / math.log(maxHz / minHz)).clamp(0.0, 1.0);
+  }
+
+  @override
+  void dispose() {
+    _stopScoring();
+    super.dispose();
   }
 
   @override
@@ -117,9 +423,7 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
       children: [
         WebViewWidget(controller: _controller),
         if (!_isReady)
-          const Center(
-            child: CircularProgressIndicator(),
-          ),
+          const Center(child: CircularProgressIndicator()),
       ],
     );
   }
