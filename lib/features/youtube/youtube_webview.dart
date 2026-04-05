@@ -148,17 +148,9 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
         + '#comments{display:none!important}'
         + '#related{display:none!important}'
         + 'ytd-watch-next-secondary-results-renderer{display:none!important}'
-        + '.ytd-mealbar-promo-renderer{display:none!important}'
         + 'ytd-mealbar-promo-renderer{display:none!important}'
-        + '.ytd-banner-promo-renderer{display:none!important}'
         + 'tp-yt-paper-dialog{display:none!important}'
-        + '.yt-mealbar-promo-renderer{display:none!important}'
-        + '.open-app-button{display:none!important}'
-        + '.smartimation-background{display:none!important}'
-        + '.mobile-topbar-header-content .topbar-menu-button-avatar-button{display:none!important}'
-        + '.ytm-autonav-bar{display:none!important}'
         + 'ytm-promoted-sparkles-web-renderer{display:none!important}'
-        + '.ytm-app-promotion-banner{display:none!important}'
         + '.c3-module-companion{display:none!important}';
       document.head.appendChild(s);
     })();
@@ -166,16 +158,24 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
 
   static const _removeOpenAppJs = '''
     (function() {
-      function removeAppButtons() {
-        document.querySelectorAll(
-          '.open-app-button, .ytm-app-promotion-banner, '
-          + 'a[href*="intent://"], .companion-ad-container, '
-          + '.ytp-paid-content-overlay'
-        ).forEach(function(el) { el.style.display = "none"; });
+      function hideOpenApp() {
+        // Find elements by text content — safest, won't break other buttons.
+        document.querySelectorAll('a, button, div').forEach(function(el) {
+          var t = el.textContent.trim().toLowerCase();
+          if ((t === 'open app' || t === 'get app' || t === 'use app' || t === 'open')
+              && el.closest && !el.closest('#search-form')
+              && el.offsetWidth < 200) {
+            el.style.display = 'none';
+          }
+        });
+        // Also hide intent:// links (Android app deep links).
+        document.querySelectorAll('a[href*="intent://"]').forEach(function(el) {
+          el.style.display = 'none';
+        });
       }
-      removeAppButtons();
-      setTimeout(removeAppButtons, 2000);
-      setTimeout(removeAppButtons, 5000);
+      hideOpenApp();
+      setTimeout(hideOpenApp, 2000);
+      setTimeout(hideOpenApp, 5000);
     })();
   ''';
 
