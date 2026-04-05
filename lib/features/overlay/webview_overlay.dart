@@ -145,6 +145,8 @@ class WebviewOverlay {
     (function() {
       var existing = document.getElementById('fk-overlay');
       if (existing) existing.remove();
+      var proc = document.getElementById('fk-processing');
+      if (proc) proc.remove();
 
       var overlay = document.createElement('div');
       overlay.id = 'fk-overlay';
