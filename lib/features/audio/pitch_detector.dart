@@ -1,5 +1,6 @@
 import 'dart:math' as math;
-import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
 
 import '../../core/constants.dart';
 
@@ -26,9 +27,11 @@ class PitchDetector {
   final int sampleRate;
   final double threshold;
 
+  int _debugCount = 0;
+
   PitchDetector({
     this.sampleRate = kSampleRate,
-    this.threshold = 0.15,
+    this.threshold = 0.70, // Relaxed for mixed mic+speaker signals
   });
 
   /// Detect the fundamental frequency in Hz from a PCM audio frame.
@@ -47,7 +50,19 @@ class PitchDetector {
     final cmndf = _cumulativeMeanNormalized(diff, halfLen);
 
     final result = _absoluteThresholdWithConfidence(cmndf, halfLen);
-    if (result == null) return PitchResult.none;
+    if (result == null) {
+      // Log the minimum CMNDF value to understand why detection fails.
+      double minCmndf = 1.0;
+      for (var tau = sampleRate ~/ 1000; tau < halfLen; tau++) {
+        if (cmndf[tau] < minCmndf) minCmndf = cmndf[tau];
+      }
+      _debugCount++;
+      if (_debugCount <= 5 || _debugCount % 200 == 0) {
+        debugPrint('YIN: no pitch, minCMNDF=${minCmndf.toStringAsFixed(3)}, '
+            'threshold=$threshold, samples=${samples.length}');
+      }
+      return PitchResult.none;
+    }
 
     final tauEstimate = result.$1;
     final cmndfMin = result.$2;

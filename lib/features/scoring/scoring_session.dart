@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../core/audio_preset.dart';
 import '../../core/scoring_mode.dart';
+import '../audio/bandpass_filter.dart';
 import '../audio/mic_capture_service.dart';
 import '../audio/pitch_detector.dart';
 import '../audio/voice_isolator.dart';
@@ -21,6 +22,7 @@ class ScoringSession {
   final MicCaptureService _mic;
   final PitchDetector _pitchDetector;
   final VoiceIsolator _voiceIsolator;
+  final BandpassFilter _bandpass;
   final double _noiseGateThreshold;
   final double _singingThreshold;
   final ScoringMode _mode;
@@ -74,6 +76,7 @@ class ScoringSession {
         _mode = mode,
         _pitchDetector = PitchDetector(),
         _voiceIsolator = VoiceIsolator(preset: preset),
+        _bandpass = BandpassFilter(),
         _noiseGateThreshold = calibratedNoiseGate ?? preset.noiseGateThreshold,
         _singingThreshold = calibratedSingingThreshold ?? 0.0005;
 
@@ -125,6 +128,7 @@ class ScoringSession {
     _allTimeScoreSum = 0;
     _currentReferenceFrame = null;
     _voiceIsolator.reset();
+    _bandpass.reset();
     _isActive = true;
     _processedFrames = 0;
 
@@ -139,23 +143,31 @@ class ScoringSession {
   void _onMicFrame(Float64List normalizedSamples, double rawPeak) {
     if (!_isActive) return;
 
-    // Use normalized samples for pitch detection (shape-based).
-    // Use rawPeak for noise gating (amplitude-based).
-    final samples = _voiceIsolator.process(
+    // Processing pipeline:
+    // 1. Voice isolator (spectral subtraction when reference available)
+    // 2. Bandpass filter 200-3500 Hz (attenuates music bass/treble,
+    //    emphasizes vocal frequency range for better pitch detection
+    //    when phone mic picks up speaker audio + voice together)
+    var samples = _voiceIsolator.process(
       normalizedSamples,
       referenceSamples: _currentReferenceFrame,
     );
+    samples = _bandpass.process(samples);
 
-    final rms = rawPeak; // Use raw peak as the "energy" measure
+    final rms = rawPeak;
     _processedFrames++;
 
-    if (_processedFrames <= 10 || _processedFrames % 200 == 0) {
-      debugPrint('Scoring: frame #$_processedFrames rawPeak=${rawPeak.toStringAsFixed(4)} '
-          'gate=$_noiseGateThreshold sing=$_singingThreshold');
+    // Log every 10th frame to see the full picture without flooding
+    final shouldLog = _processedFrames <= 10 || _processedFrames % 10 == 0;
+
+    if (shouldLog) {
+      debugPrint('SC #$_processedFrames pk=${rawPeak.toStringAsFixed(4)}');
     }
 
-    // Noise gate based on raw (pre-normalization) amplitude
+    // Noise gate
     if (rawPeak < _noiseGateThreshold) {
+      if (shouldLog) debugPrint('  -> GATED (pk < ${_noiseGateThreshold.toStringAsFixed(4)})');
+
       _silentFrames++;
       if (_silentFrames > 12) {
         _prevSingerMidi = 0;
@@ -171,19 +183,17 @@ class ScoringSession {
     // Singing threshold
     if (rawPeak < _singingThreshold) {
       if (_mode == ScoringMode.streak) _streakCount = 0;
-      if (_processedFrames <= 10 || _processedFrames % 200 == 0) {
-        debugPrint('Scoring: REJECTED by singing threshold');
-      }
+      if (shouldLog) debugPrint('  -> LOW (pk < sing ${_singingThreshold.toStringAsFixed(4)})');
       _emit(0, 0, '--', 0, 0, 0, rms);
       return;
     }
 
     // Pitch detection
     final result = _pitchDetector.detectPitchWithConfidence(samples);
-    if (result.pitchHz < 60 || result.confidence < 0.3) {
+    if (result.pitchHz < 60 || result.confidence < 0.1) {
       if (_mode == ScoringMode.streak) _streakCount = 0;
-      if (_processedFrames <= 10 || _processedFrames % 200 == 0) {
-        debugPrint('Scoring: REJECTED pitch=${result.pitchHz.toStringAsFixed(0)} '
+      if (shouldLog) {
+        debugPrint('  -> NOPITCH hz=${result.pitchHz.toStringAsFixed(0)} '
             'conf=${result.confidence.toStringAsFixed(2)}');
       }
       _emit(0, 0, '--', 0, result.confidence, 0, rms);
@@ -232,14 +242,12 @@ class ScoringSession {
     const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
     final noteName = '${names[nn % 12]}${nn ~/ 12 - 1}';
 
-    if (_processedFrames <= 5 || _processedFrames % 100 == 0) {
-      debugPrint('Scoring[${_mode.name}]: #$_processedFrames '
-          'primary=${primaryScore.toStringAsFixed(2)} '
+    if (shouldLog) {
+      debugPrint('  -> HIT! ${pitchHz.toStringAsFixed(0)}Hz '
           'conf=${confidence.toStringAsFixed(2)} '
+          'prim=${primaryScore.toStringAsFixed(2)} '
           'frame=${frameScore.toStringAsFixed(2)} '
-          'live=$currentScore overall=$finalScore '
-          'streak=$_streakCount '
-          'singer=${pitchHz.toStringAsFixed(0)}Hz');
+          'live=$currentScore');
     }
 
     _emit(pitchHz, primaryScore, noteName, 0, confidence, frameScore, rms);

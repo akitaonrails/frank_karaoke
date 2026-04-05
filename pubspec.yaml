@@ -24,7 +24,6 @@ dependencies:
   # Audio
   just_audio: ^0.9.43
   record: ^6.0.0
-  audio_session: ^0.1.25
 
   # Persistence
   drift: ^2.24.0
