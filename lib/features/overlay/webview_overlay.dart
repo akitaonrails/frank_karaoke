@@ -14,20 +14,20 @@ class WebviewOverlay {
         + 'animation:fkFadeIn 0.4s ease-out;';
 
       var card = document.createElement('div');
-      card.style.cssText = 'max-width:480px;background:rgba(20,20,40,0.95);'
-        + 'border-radius:24px;padding:32px 36px;color:#fff;'
+      card.style.cssText = 'max-width:540px;background:rgba(20,20,40,0.95);'
+        + 'border-radius:24px;padding:36px 40px;color:#fff;'
         + 'border:1px solid rgba(108,92,231,0.4);'
         + 'box-shadow:0 8px 60px rgba(108,92,231,0.3);';
 
       var title = document.createElement('div');
-      title.style.cssText = 'font-size:28px;font-weight:800;margin-bottom:8px;'
+      title.style.cssText = 'font-size:32px;font-weight:800;margin-bottom:8px;'
         + 'background:linear-gradient(135deg,#6c5ce7,#00d2ff);'
         + '-webkit-background-clip:text;-webkit-text-fill-color:transparent;';
       title.textContent = 'Frank Karaoke';
       card.appendChild(title);
 
       var sub = document.createElement('div');
-      sub.style.cssText = 'font-size:13px;color:rgba(255,255,255,0.5);margin-bottom:20px;';
+      sub.style.cssText = 'font-size:15px;color:rgba(255,255,255,0.5);margin-bottom:24px;';
       sub.textContent = 'Sing along with any YouTube karaoke video';
       card.appendChild(sub);
 
@@ -59,26 +59,35 @@ class WebviewOverlay {
       for (var i = 0; i < sections.length; i++) {
         var s = sections[i];
         var row = document.createElement('div');
-        row.style.cssText = 'display:flex;gap:12px;margin-bottom:14px;align-items:flex-start;';
+        row.style.cssText = 'display:flex;gap:14px;margin-bottom:18px;align-items:flex-start;';
         var icon = document.createElement('div');
-        icon.style.cssText = 'font-size:20px;flex-shrink:0;margin-top:2px;';
+        icon.style.cssText = 'font-size:24px;flex-shrink:0;margin-top:1px;';
         icon.textContent = s.icon;
         row.appendChild(icon);
         var col = document.createElement('div');
         var t = document.createElement('div');
-        t.style.cssText = 'font-size:13px;font-weight:700;color:#fff;margin-bottom:2px;';
+        t.style.cssText = 'font-size:15px;font-weight:700;color:#fff;margin-bottom:3px;';
         t.textContent = s.title;
         col.appendChild(t);
         var p = document.createElement('div');
-        p.style.cssText = 'font-size:11px;color:rgba(255,255,255,0.55);line-height:1.4;';
+        p.style.cssText = 'font-size:13px;color:rgba(255,255,255,0.55);line-height:1.5;';
         p.textContent = s.text;
         col.appendChild(p);
         row.appendChild(col);
         card.appendChild(row);
       }
 
+      // Calibration callout
+      var calTip = document.createElement('div');
+      calTip.style.cssText = 'background:rgba(0,210,255,0.1);border:1px solid rgba(0,210,255,0.25);'
+        + 'border-radius:12px;padding:10px 14px;margin-bottom:4px;'
+        + 'font-size:12px;color:rgba(0,210,255,0.85);line-height:1.4;';
+      calTip.textContent = '\\u{1F4A1} Tip: Open settings and calibrate your mic before singing. '
+        + 'It takes 3 seconds and makes scoring work in any room.';
+      card.appendChild(calTip);
+
       var btnRow = document.createElement('div');
-      btnRow.style.cssText = 'display:flex;gap:10px;margin-top:20px;justify-content:flex-end;';
+      btnRow.style.cssText = 'display:flex;gap:10px;margin-top:16px;justify-content:flex-end;';
 
       var dontShow = document.createElement('div');
       dontShow.textContent = "Don\\u0027t show again";
