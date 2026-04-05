@@ -130,13 +130,12 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
     final currentId = ref.read(currentVideoIdProvider);
 
     if (videoId != null && videoId != currentId) {
+      // New video detected.
       ref.read(currentVideoIdProvider.notifier).state = videoId;
       _onVideoDetected(videoId);
-    } else if (videoId == null && currentId != null) {
-      ref.read(currentVideoIdProvider.notifier).state = null;
-      ref.read(isVideoPlayingProvider.notifier).state = false;
-      _stopScoring();
     }
+    // Don't stop scoring when videoId == currentId (seeking within same video)
+    // or when URL briefly has no videoId (YouTube SPA transition).
   }
 
   void _onJsMessage(JavaScriptMessage message) {
@@ -356,10 +355,8 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
     }
 
     final rmsValues = <double>[];
-    final sub = mic.pcmStream.listen((samples) {
-      double sum = 0;
-      for (final s in samples) { sum += s * s; }
-      rmsValues.add(sum > 0 ? math.sqrt(sum / samples.length) : 0.0);
+    final sub = mic.pcmStream.listen((frame) {
+      rmsValues.add(frame.rawPeak);
     });
 
     for (var i = 2; i >= 0; i--) {

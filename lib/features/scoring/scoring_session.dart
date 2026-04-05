@@ -25,7 +25,7 @@ class ScoringSession {
   final double _singingThreshold;
   final ScoringMode _mode;
 
-  StreamSubscription<Float64List>? _micSub;
+  StreamSubscription<MicFrame>? _micSub;
   final _scoreController = StreamController<ScoringUpdate>.broadcast();
   bool _isActive = false;
 
@@ -128,7 +128,7 @@ class ScoringSession {
     _isActive = true;
     _processedFrames = 0;
 
-    _micSub = _mic.pcmStream.listen(_onMicFrame);
+    _micSub = _mic.pcmStream.listen((frame) => _onMicFrame(frame.samples, frame.rawPeak));
     debugPrint('ScoringSession: started mode=${_mode.name} '
         'ref=${_hasReference ? "yes" : "no"}');
     return true;
@@ -136,24 +136,26 @@ class ScoringSession {
 
   int _processedFrames = 0;
 
-  void _onMicFrame(Float64List rawSamples) {
+  void _onMicFrame(Float64List normalizedSamples, double rawPeak) {
     if (!_isActive) return;
 
+    // Use normalized samples for pitch detection (shape-based).
+    // Use rawPeak for noise gating (amplitude-based).
     final samples = _voiceIsolator.process(
-      rawSamples,
+      normalizedSamples,
       referenceSamples: _currentReferenceFrame,
     );
 
-    final rms = PitchDetector.rmsEnergy(samples);
+    final rms = rawPeak; // Use raw peak as the "energy" measure
     _processedFrames++;
 
     if (_processedFrames <= 10 || _processedFrames % 200 == 0) {
-      debugPrint('Scoring: frame #$_processedFrames rms=${rms.toStringAsFixed(4)} '
+      debugPrint('Scoring: frame #$_processedFrames rawPeak=${rawPeak.toStringAsFixed(4)} '
           'gate=$_noiseGateThreshold sing=$_singingThreshold');
     }
 
-    // Noise gate
-    if (rms < _noiseGateThreshold) {
+    // Noise gate based on raw (pre-normalization) amplitude
+    if (rawPeak < _noiseGateThreshold) {
       _silentFrames++;
       if (_silentFrames > 12) {
         _prevSingerMidi = 0;
@@ -167,7 +169,7 @@ class ScoringSession {
     _silentFrames = 0;
 
     // Singing threshold
-    if (rms < _singingThreshold) {
+    if (rawPeak < _singingThreshold) {
       if (_mode == ScoringMode.streak) _streakCount = 0;
       if (_processedFrames <= 10 || _processedFrames % 200 == 0) {
         debugPrint('Scoring: REJECTED by singing threshold');

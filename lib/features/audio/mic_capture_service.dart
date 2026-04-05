@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
@@ -7,21 +6,20 @@ import 'package:record/record.dart';
 
 import '../../core/constants.dart';
 
-/// Captures raw PCM audio from the microphone using the record package.
-/// Configured for simultaneous playback + recording on Android.
+/// Captures raw PCM audio from the microphone.
+/// Normalizes quiet signals for pitch detection, preserves raw peak for gating.
 class MicCaptureService {
   final _recorder = AudioRecorder();
   StreamSubscription<Uint8List>? _streamSub;
-  final _pcmController = StreamController<Float64List>.broadcast();
+  final _pcmController = StreamController<MicFrame>.broadcast();
   bool _isRecording = false;
   bool _sessionConfigured = false;
 
-  Stream<Float64List> get pcmStream => _pcmController.stream;
+  Stream<MicFrame> get pcmStream => _pcmController.stream;
   bool get isRecording => _isRecording;
 
-  /// Configure the audio session for simultaneous playback + recording.
-  /// Must be called before starting the mic on Android.
-  Future<void> _configureAudioSession() async {
+  /// Configure audio session so mic recording doesn't pause YouTube video.
+  Future<void> _ensureAudioSession() async {
     if (_sessionConfigured) return;
     try {
       final session = await AudioSession.instance;
@@ -29,18 +27,17 @@ class MicCaptureService {
         avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
         avAudioSessionCategoryOptions:
             AVAudioSessionCategoryOptions.defaultToSpeaker |
-            AVAudioSessionCategoryOptions.allowBluetooth |
             AVAudioSessionCategoryOptions.mixWithOthers,
         androidAudioAttributes: const AndroidAudioAttributes(
           contentType: AndroidAudioContentType.music,
-          usage: AndroidAudioUsage.game,
+          usage: AndroidAudioUsage.media,
         ),
         androidWillPauseWhenDucked: false,
       ));
       _sessionConfigured = true;
-      debugPrint('MicCapture: audio session configured for mix mode');
+      debugPrint('MicCapture: audio session configured');
     } catch (e) {
-      debugPrint('MicCapture: audio session config failed: $e');
+      debugPrint('MicCapture: audio session failed: $e');
     }
   }
 
@@ -53,11 +50,8 @@ class MicCaptureService {
       return false;
     }
 
-    // On Android, configure audio session BEFORE starting recording
-    // to prevent the mic from stealing audio focus from the webview.
-    if (!kIsWeb && Platform.isAndroid) {
-      await _configureAudioSession();
-    }
+    // Configure audio session to allow simultaneous playback + recording.
+    await _ensureAudioSession();
 
     try {
       final stream = await _recorder.startStream(
@@ -65,18 +59,26 @@ class MicCaptureService {
           encoder: AudioEncoder.pcm16bits,
           sampleRate: kSampleRate,
           numChannels: 1,
-          // Disable all Android audio preprocessors — they can
-          // aggressively filter the signal on some devices,
-          // leaving only silence/noise for pitch detection.
+          // CRITICAL: autoGain must be FALSE on Samsung devices.
+          // Samsung's AutomaticGainControl DSP ATTENUATES the signal
+          // instead of boosting it, reducing peak to ~0.003.
           autoGain: false,
           echoCancel: false,
           noiseSuppress: false,
+          androidConfig: AndroidRecordConfig(
+            // voicePerformance: Android's dedicated source for karaoke/
+            // live singing apps. Provides better gain than defaultSource.
+            audioSource: AndroidAudioSource.voicePerformance,
+            manageBluetooth: false,
+            // Use AudioRecord (not MediaRecorder) for direct PCM access.
+            useLegacy: false,
+          ),
         ),
       );
 
       _streamSub = stream.listen(_onAudioData);
       _isRecording = true;
-      debugPrint('MicCapture: recording started');
+      debugPrint('MicCapture: recording started (voicePerformance, no AGC)');
       return true;
     } catch (e) {
       debugPrint('MicCapture: failed to start: $e');
@@ -88,16 +90,11 @@ class MicCaptureService {
 
   void _onAudioData(Uint8List bytes) {
     if (bytes.isEmpty) return;
-
     _frameCount++;
-    if (_frameCount <= 3 || _frameCount % 100 == 0) {
-      debugPrint('MicCapture: frame #$_frameCount, ${bytes.length} bytes');
-    }
 
     final samples = Float64List(bytes.length ~/ 2);
     final byteData = ByteData.sublistView(bytes);
 
-    // Find peak amplitude for auto-gain
     double peak = 0;
     for (var i = 0; i < samples.length; i++) {
       final sample = byteData.getInt16(i * 2, Endian.little);
@@ -106,22 +103,26 @@ class MicCaptureService {
       if (abs > peak) peak = abs;
     }
 
-    // Software gain: if peak is very low, amplify the signal.
-    // Android phone mics can produce extremely quiet PCM (~0.002 peak).
-    // Target peak ~0.3 for good pitch detection.
-    if (peak > 0.0001 && peak < 0.1) {
+    if (_frameCount <= 5 || _frameCount % 100 == 0) {
+      debugPrint('MicCapture: frame #$_frameCount, '
+          'peak=${peak.toStringAsFixed(4)}, ${bytes.length} bytes');
+    }
+
+    // Software gain for quiet mics: only normalize when peak is
+    // very low (< 0.01). This handles devices where hardware gain
+    // is insufficient without distorting normal-level signals.
+    if (peak > 0.00001 && peak < 0.01) {
       final gain = 0.3 / peak;
-      final clampedGain = gain > 50 ? 50.0 : gain; // max 50x
+      final clampedGain = gain > 30 ? 30.0 : gain;
       for (var i = 0; i < samples.length; i++) {
         samples[i] *= clampedGain;
       }
       if (_frameCount <= 5) {
-        debugPrint('MicCapture: software gain ${clampedGain.toStringAsFixed(1)}x '
-            '(peak was ${peak.toStringAsFixed(4)})');
+        debugPrint('MicCapture: software gain ${clampedGain.toStringAsFixed(1)}x');
       }
     }
 
-    _pcmController.add(samples);
+    _pcmController.add(MicFrame(samples, peak));
   }
 
   Future<void> stop() async {
@@ -130,6 +131,7 @@ class MicCaptureService {
     _streamSub = null;
     await _recorder.stop();
     _isRecording = false;
+    _frameCount = 0;
     debugPrint('MicCapture: recording stopped');
   }
 
@@ -138,4 +140,11 @@ class MicCaptureService {
     await _pcmController.close();
     _recorder.dispose();
   }
+}
+
+/// A mic audio frame with processed samples and raw peak amplitude.
+class MicFrame {
+  final Float64List samples;
+  final double rawPeak;
+  const MicFrame(this.samples, this.rawPeak);
 }
