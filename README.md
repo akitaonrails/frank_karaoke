@@ -68,7 +68,7 @@ This means:
 
 - **Without the pitch oracle** (when the reference audio download fails or times out), the app can only judge *how* you sing (pitch stability, melodic movement, interval quality), not *what* you should be singing. It can't tell if you're singing the right melody for this specific song.
 - **With the pitch oracle** (when the reference audio downloads successfully), the app knows what the music sounds like at every moment. It compares your voice's pitch against the reference to distinguish your singing from speaker bleed — if the mic detects the same pitch as the music, it's the speaker, not you. The first play of a song takes a few seconds to analyze; after that, the data is cached locally and loads instantly on repeat plays.
-- **The phone mic challenge**: On Android with the built-in mic, the microphone captures your voice *plus* the music playing from the speaker. The app uses a 200-3500 Hz bandpass filter to emphasize vocal frequencies and reduce instrumental bleed, but separation isn't perfect.
+- **The phone mic challenge**: On Android with the built-in mic, the microphone captures your voice *plus* the music playing from the speaker. The app uses three layers of filtering: (1) adaptive RMS baseline calibrated from the instrumental intro to distinguish voice from speaker volume, (2) a 200-3500 Hz bandpass filter to reduce instrumental bleed, and (3) pitch oracle comparison to identify speaker bleed by matching detected pitch against the reference audio.
 
 For detailed technical background, see [docs/scoring.md](docs/scoring.md).
 

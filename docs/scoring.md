@@ -109,14 +109,24 @@ Video play/pause/seek events are detected via JavaScript event listeners injecte
    - Center clipping destroys the waveform shape that YIN needs for autocorrelation
    - Pre-emphasis amplifies noise as much as voice
 
-### What We Use
+### What We Use: Three-Layer Filtering
 
-**Bandpass filter (200-3500 Hz)**: A cascaded second-order IIR filter (Butterworth, Q=0.707) with:
+**Layer 1: Adaptive RMS baseline**
+
+During the 5-second warmup (instrumental intro), the app measures the mic's RMS level with only speaker audio present. This becomes the "speaker-only baseline." During scoring, frames must exceed 1.3x this baseline to be considered voice — meaning the singer must be noticeably louder than the speaker alone. The baseline adapts throughout the song using the 25th percentile of recent RMS values, tracking volume changes in the music.
+
+**Layer 2: Bandpass filter (200-3500 Hz)**
+
+A cascaded second-order IIR filter (Butterworth, Q=0.707):
 - High-pass at 200 Hz: removes bass, kick drum, bass guitar from speaker bleed
 - Low-pass at 3500 Hz: removes cymbals, hi-hats, high-frequency speaker noise
 - Voice fundamentals (85-300 Hz) and formants (300-3000 Hz) pass through
 
-This doesn't perfectly isolate the voice, but it significantly improves the voice-to-music ratio for pitch detection.
+**Layer 3: Pitch oracle comparison**
+
+When the oracle is loaded, detected mic pitch is compared against the reference pitch at the current video timestamp. If they match (same pitch class, octave-agnostic), the frame is classified as speaker bleed and ignored.
+
+Together these three layers produce clear differentiation: in testing, an original singer through speakers scored ~37 with sparse pitch trail dots, while a user singing karaoke scored ~59 with dense, continuous dots.
 
 ### Pitch Oracle (Implemented)
 
