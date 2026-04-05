@@ -3,8 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/audio_preset.dart';
+import '../../core/constants.dart';
 import '../../state/providers.dart';
-import '../../ui/screens/settings_screen.dart';
 import '../overlay/webview_overlay.dart';
 import '../scoring/scoring_session.dart';
 import 'linux_webview_controller.dart';
@@ -46,15 +47,48 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
     await _controller.create(url: widget.initialUrl);
     _created = true;
 
-    // Register JS handlers for overlay buttons.
+    // Register JS handlers for inline controls.
     _controller.addJavaScriptHandler(
-      handlerName: 'FrankSettings',
-      callback: (_) => _openSettings(),
+      handlerName: 'FrankPreset',
+      callback: (args) => _onPresetChange(args.isNotEmpty ? args[0] : ''),
+    );
+    _controller.addJavaScriptHandler(
+      handlerName: 'FrankPitch',
+      callback: (args) => _onPitchChange(args.isNotEmpty ? args[0] : ''),
     );
     _controller.addJavaScriptHandler(
       handlerName: 'FrankRestart',
       callback: (_) => _restartScoring(),
     );
+  }
+
+  void _onPresetChange(dynamic presetId) {
+    final preset = AudioPreset.values.where((p) => p.name == presetId).firstOrNull;
+    if (preset == null) return;
+    ref.read(audioPresetProvider.notifier).state = preset;
+    // Update the overlay button highlight.
+    if (_created && _overlayInjected) {
+      _controller.evaluateJavascript(
+        source: WebviewOverlay.updatePresetJs(preset.name),
+      );
+    }
+    // Restart scoring with new preset.
+    if (_scoringSession != null) {
+      _restartScoring();
+    }
+  }
+
+  void _onPitchChange(dynamic direction) {
+    final current = ref.read(pitchShiftProvider);
+    final next = direction == 'up'
+        ? (current + 1).clamp(kPitchShiftMin, kPitchShiftMax)
+        : (current - 1).clamp(kPitchShiftMin, kPitchShiftMax);
+    ref.read(pitchShiftProvider.notifier).state = next;
+    if (_created && _overlayInjected) {
+      _controller.evaluateJavascript(
+        source: WebviewOverlay.updatePitchShiftJs(next),
+      );
+    }
   }
 
   void _onEvent(dynamic event) {
@@ -66,14 +100,11 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       case 'onLoadStop':
         final url = data is Map ? data['url'] as String? : null;
         if (url != null) _onUrlChange(url);
-        if (_overlayInjected) {
-          _reinjectOverlay();
-        } else {
-          // Always show settings gear, even on non-video pages.
-          _controller.evaluateJavascript(
-            source: WebviewOverlay.injectSettingsOnlyJs,
-          );
+        // Clean up YouTube's UI on every page load.
+        if (_created) {
+          _controller.evaluateJavascript(source: _cleanYouTubeUiJs);
         }
+        if (_overlayInjected) _reinjectOverlay();
       case 'onUpdateVisitedHistory':
         final url = data is Map ? data['url'] as String? : null;
         if (url != null) _onUrlChange(url);
@@ -85,6 +116,25 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
         }
     }
   }
+
+  /// Hide YouTube's recommended sidebar, comments, and clutter.
+  static const _cleanYouTubeUiJs = '''
+    (function() {
+      var style = document.createElement('style');
+      style.id = 'fk-yt-cleanup';
+      if (document.getElementById('fk-yt-cleanup')) return;
+      style.textContent = [
+        '#secondary { display: none !important; }',
+        '#comments { display: none !important; }',
+        '#related { display: none !important; }',
+        'ytd-watch-next-secondary-results-renderer { display: none !important; }',
+        '#info-contents .ytd-watch-metadata { max-width: 100% !important; }',
+        '#below { max-width: 100% !important; }',
+        '#primary { max-width: 100% !important; }',
+      ].join('\\n');
+      document.head.appendChild(style);
+    })();
+  ''';
 
   void _onUrlChange(String url) {
     final videoId = extractVideoId(url);
@@ -124,7 +174,6 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       );
     }
 
-    // Automatically start scoring when a video plays.
     _startScoring();
   }
 
@@ -138,17 +187,21 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
     final started = await _scoringSession!.start();
 
     if (!started) {
-      debugPrint('Scoring: mic unavailable, overlay only');
+      debugPrint('Scoring: mic unavailable');
       _scoringSession = null;
     }
 
-    // Inject overlay regardless of mic (shows song info even without scoring).
     if (_created) {
       final title = ref.read(currentVideoTitleProvider) ?? '';
+      final pitchShift = ref.read(pitchShiftProvider);
       debugPrint('Overlay: injecting for "$title"');
       try {
         await _controller.evaluateJavascript(
-          source: WebviewOverlay.injectOverlayJs(singerName: title),
+          source: WebviewOverlay.injectOverlayJs(
+            singerName: title,
+            activePreset: preset.name,
+            pitchShift: pitchShift,
+          ),
         );
         _overlayInjected = true;
         _lastInjectedScore = -1;
@@ -160,7 +213,6 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
 
     _scoreSub = _scoringSession?.scoreStream.listen(_onScoreUpdate);
 
-    // Start polling for video end.
     _celebrationShown = false;
     _videoEndTimer?.cancel();
     _videoEndTimer = Timer.periodic(const Duration(seconds: 2), (_) {
@@ -205,7 +257,6 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
   void _onScoreUpdate(ScoringUpdate update) {
     if (!_created || !_overlayInjected) return;
 
-    // Update score number with feedback text.
     if (update.totalScore != _lastInjectedScore) {
       _lastInjectedScore = update.totalScore;
       _controller.evaluateJavascript(
@@ -214,7 +265,6 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       ref.read(currentScoreProvider.notifier).state = update.totalScore;
     }
 
-    // Update dual-track pitch trail (voice vs reference from Web Audio).
     final normalizedPitch = update.singerPitchHz > 0
         ? ((update.singerPitchHz - 80) / 720).clamp(0.0, 1.0)
         : 0.0;
@@ -225,25 +275,14 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       ),
     );
 
-    // Update note label and mic dot.
     final normalizedRms = (update.rmsEnergy * 100).clamp(0.0, 1.0);
     _controller.evaluateJavascript(
       source: WebviewOverlay.updateNoteAndRmsJs(update.noteName, normalizedRms),
     );
   }
 
-  void _openSettings() {
-    if (!mounted) return;
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => const SettingsScreen(),
-      ),
-    );
-  }
-
   Future<void> _restartScoring() async {
     if (!_created) return;
-    // Reload the video from the start.
     await _controller.evaluateJavascript(
       source: '''
         (function() {
@@ -252,7 +291,6 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
         })();
       ''',
     );
-    // Restart scoring fresh.
     await _stopScoring();
     _startScoring();
   }
@@ -279,8 +317,14 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
   void _reinjectOverlay() {
     if (!_overlayInjected || !_created) return;
     final title = ref.read(currentVideoTitleProvider) ?? '';
+    final preset = ref.read(audioPresetProvider);
+    final pitchShift = ref.read(pitchShiftProvider);
     _controller.evaluateJavascript(
-      source: WebviewOverlay.injectOverlayJs(singerName: title),
+      source: WebviewOverlay.injectOverlayJs(
+        singerName: title,
+        activePreset: preset.name,
+        pitchShift: pitchShift,
+      ),
     );
   }
 
