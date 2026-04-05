@@ -91,22 +91,36 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
     setState(() => _isReady = true);
     _injectBridge();
     _runJs(_cleanYouTubeUiJs);
-    // Aggressively prevent auto-play. YouTube starts videos after its JS
-    // initializes, which may be after our onPageFinished. We install a
-    // listener that pauses the video every time it starts playing, until
-    // we explicitly allow it via _fkAllowPlay.
+    // Block auto-play: intercept the video element whenever it appears.
+    // YouTube dynamically creates/replaces video elements, so we use
+    // MutationObserver to catch them all. Every video gets a play listener
+    // that pauses unless _fkAllowPlay is true.
     _runJs('''
       (function() {
         window._fkAllowPlay = false;
-        function blockAutoPlay() {
-          var v = document.querySelector('video');
-          if (!v) { setTimeout(blockAutoPlay, 500); return; }
+        function guardVideo(v) {
+          if (v._fkGuarded) return;
+          v._fkGuarded = true;
           v.addEventListener('play', function() {
-            if (!window._fkAllowPlay) v.pause();
+            if (!window._fkAllowPlay) { v.pause(); }
+          });
+          v.addEventListener('playing', function() {
+            if (!window._fkAllowPlay) { v.pause(); }
           });
           if (!v.paused) v.pause();
         }
-        blockAutoPlay();
+        // Guard any existing video.
+        document.querySelectorAll('video').forEach(guardVideo);
+        // Watch for new video elements.
+        new MutationObserver(function() {
+          document.querySelectorAll('video').forEach(guardVideo);
+        }).observe(document.body || document.documentElement, {childList:true, subtree:true});
+        // Also retry every 500ms for 10 seconds as a safety net.
+        var attempts = 0;
+        var timer = setInterval(function() {
+          document.querySelectorAll('video').forEach(guardVideo);
+          if (++attempts > 20) clearInterval(timer);
+        }, 500);
       })();
     ''');
     if (!_welcomeShown && !_welcomeDismissedPermanently) {
