@@ -91,14 +91,24 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
     setState(() => _isReady = true);
     _injectBridge();
     _runJs(_cleanYouTubeUiJs);
-    _runJs(_removeOpenAppJs);
-    // Pause any auto-playing video. YouTube may start playback after
-    // our pause fires, so we retry several times over 5 seconds.
-    for (var i = 0; i < 5; i++) {
-      Future.delayed(Duration(seconds: i), () {
-        _runJs('''(function(){var v=document.querySelector('video');if(v&&!v.paused)v.pause();})();''');
-      });
-    }
+    // Aggressively prevent auto-play. YouTube starts videos after its JS
+    // initializes, which may be after our onPageFinished. We install a
+    // listener that pauses the video every time it starts playing, until
+    // we explicitly allow it via _fkAllowPlay.
+    _runJs('''
+      (function() {
+        window._fkAllowPlay = false;
+        function blockAutoPlay() {
+          var v = document.querySelector('video');
+          if (!v) { setTimeout(blockAutoPlay, 500); return; }
+          v.addEventListener('play', function() {
+            if (!window._fkAllowPlay) v.pause();
+          });
+          if (!v.paused) v.pause();
+        }
+        blockAutoPlay();
+      })();
+    ''');
     if (!_welcomeShown && !_welcomeDismissedPermanently) {
       _welcomeShown = true;
       _runJs(WebviewOverlay.welcomeOverlayJs);
@@ -153,29 +163,6 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
         + 'ytm-promoted-sparkles-web-renderer{display:none!important}'
         + '.c3-module-companion{display:none!important}';
       document.head.appendChild(s);
-    })();
-  ''';
-
-  static const _removeOpenAppJs = '''
-    (function() {
-      function hideOpenApp() {
-        // Find elements by text content — safest, won't break other buttons.
-        document.querySelectorAll('a, button, div').forEach(function(el) {
-          var t = el.textContent.trim().toLowerCase();
-          if ((t === 'open app' || t === 'get app' || t === 'use app' || t === 'open')
-              && el.closest && !el.closest('#search-form')
-              && el.offsetWidth < 200) {
-            el.style.display = 'none';
-          }
-        });
-        // Also hide intent:// links (Android app deep links).
-        document.querySelectorAll('a[href*="intent://"]').forEach(function(el) {
-          el.style.display = 'none';
-        });
-      }
-      hideOpenApp();
-      setTimeout(hideOpenApp, 2000);
-      setTimeout(hideOpenApp, 5000);
     })();
   ''';
 
@@ -260,10 +247,10 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
 
     final streamInfo = await audioService.getAudioStreamInfo(videoId);
 
-    // Start scoring, then resume video playback.
+    // Start scoring, then allow and resume video playback.
     if (mounted) {
       _startScoring();
-      _runJs('''(function(){var v=document.querySelector('video');if(v){v.currentTime=0;v.play();}})();''');
+      _runJs('''(function(){window._fkAllowPlay=true;var v=document.querySelector('video');if(v){v.currentTime=0;v.play();}})();''');
     }
 
     // Build pitch oracle in the background.
