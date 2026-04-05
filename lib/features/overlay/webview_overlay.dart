@@ -34,22 +34,24 @@ class WebviewOverlay {
       var sections = [
         {
           icon: '\\u{1F3B5}',
-          title: 'No song data needed',
-          text: 'This app scores your singing without pre-made song files. '
-            + 'It analyzes the video audio in real-time and compares it to your voice. '
-            + 'Results are approximate but fun!'
+          title: 'How it works',
+          text: 'Play any YouTube karaoke video and sing along. '
+            + 'The app listens to the music and your voice separately, '
+            + 'then scores how well they match in real-time.'
         },
         {
           icon: '\\u{1F3AF}',
-          title: '4 scoring modes',
-          text: 'Pitch Match, Contour, Interval, and Streak \\u2014 each scores differently. '
-            + 'Try them all to find what feels best for each song.'
+          title: 'Pick your scoring style',
+          text: 'Pitch \\u2014 are you hitting the right notes? '
+            + 'Contour \\u2014 are you following the melody shape? '
+            + 'Interval \\u2014 are your note jumps right? '
+            + 'Streak \\u2014 party mode with combo multipliers!'
         },
         {
           icon: '\\u2699\\uFE0F',
-          title: 'Settings overlay',
-          text: 'Click the gear icon (top left) to change mic preset, '
-            + 'scoring mode, and pitch shift for high/low songs.'
+          title: 'Gear icon = settings',
+          text: 'Top-left corner. Set your mic type, switch scoring mode, '
+            + 'and shift pitch up/down for songs outside your range.'
         }
       ];
 
@@ -383,10 +385,10 @@ class WebviewOverlay {
       modeRow.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:16px;';
 
       var modes = [
-        {id:'pitchClass', label:'\\u{1F3AF} Pitch', desc:'Match the song notes (any octave)'},
-        {id:'contour', label:'\\u{3030} Contour', desc:'Follow melody shape (up/down)'},
-        {id:'interval', label:'\\u{1F4D0} Interval', desc:'Match note jumps (key-free)'},
-        {id:'streak', label:'\\u{1F525} Streak', desc:'Combo multiplier for hits'}
+        {id:'pitchClass', label:'\\u{1F3AF} Pitch', desc:'Best for songs you know well'},
+        {id:'contour', label:'\\u{3030} Contour', desc:'Best for learning new songs'},
+        {id:'interval', label:'\\u{1F4D0} Interval', desc:'Best when singing in another key'},
+        {id:'streak', label:'\\u{1F525} Streak', desc:'Best for parties and competition'}
       ];
       for (var i = 0; i < modes.length; i++) {
         var m = modes[i];
