@@ -91,8 +91,14 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
     setState(() => _isReady = true);
     _injectBridge();
     _runJs(_cleanYouTubeUiJs);
-    // Pause any auto-playing video immediately on page load.
-    _runJs('''(function(){var v=document.querySelector('video');if(v)v.pause();})();''');
+    _runJs(_removeOpenAppJs);
+    // Pause any auto-playing video. YouTube may start playback after
+    // our pause fires, so we retry several times over 5 seconds.
+    for (var i = 0; i < 5; i++) {
+      Future.delayed(Duration(seconds: i), () {
+        _runJs('''(function(){var v=document.querySelector('video');if(v&&!v.paused)v.pause();})();''');
+      });
+    }
     if (!_welcomeShown && !_welcomeDismissedPermanently) {
       _welcomeShown = true;
       _runJs(WebviewOverlay.welcomeOverlayJs);
@@ -148,8 +154,29 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
         + 'tp-yt-paper-dialog{display:none!important}'
         + '.yt-mealbar-promo-renderer{display:none!important}'
         + '[class*="open-app"]{display:none!important}'
-        + '.smartimation-background{display:none!important}';
+        + '.smartimation-background{display:none!important}'
+        + '.mobile-topbar-header-content .topbar-menu-button-avatar-button{display:none!important}'
+        + '.ytm-autonav-bar{display:none!important}'
+        + 'ytm-promoted-sparkles-web-renderer{display:none!important}'
+        + '.ytm-app-promotion-banner{display:none!important}'
+        + '.c3-module-companion{display:none!important}';
       document.head.appendChild(s);
+    })();
+  ''';
+
+  static const _removeOpenAppJs = '''
+    (function() {
+      function removeAppButtons() {
+        document.querySelectorAll(
+          '[aria-label*="app" i], [aria-label*="App"], '
+          + '.open-app-button, .ytm-app-promotion-banner, '
+          + 'a[href*="intent"], .companion-ad-container, '
+          + '.ytp-paid-content-overlay'
+        ).forEach(function(el) { el.style.display = "none"; });
+      }
+      removeAppButtons();
+      setTimeout(removeAppButtons, 2000);
+      setTimeout(removeAppButtons, 5000);
     })();
   ''';
 
