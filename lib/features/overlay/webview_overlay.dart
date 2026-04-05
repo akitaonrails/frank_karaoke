@@ -654,7 +654,7 @@ class WebviewOverlay {
         var c=document.createElement('div');c.id='fk-celebration';
         c.style.cssText='position:fixed;inset:0;z-index:999999;'
           +'background:rgba(0,0,0,0.85);display:flex;flex-direction:column;'
-          +'align-items:center;justify-content:center;pointer-events:none;'
+          +'align-items:center;justify-content:center;pointer-events:auto;cursor:pointer;'
           +'animation:fkFadeIn 0.5s ease-out;font-family:system-ui,sans-serif;';
         var em=document.createElement('div');
         em.style.cssText='font-size:80px;margin-bottom:16px;animation:fkBounce 0.6s ease-out;';
@@ -690,9 +690,19 @@ class WebviewOverlay {
           +'@keyframes fkSlideUp{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:translateY(0)}}'
           +'@keyframes fkSparkle{0%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(0) translateY(-50px)}}';
         c.appendChild(st);
+
+        var hint=document.createElement('div');
+        hint.style.cssText='margin-top:24px;font-size:14px;color:rgba(255,255,255,0.35);'
+          +'animation:fkSlideUp 0.5s ease-out 0.8s both;';
+        hint.textContent='${S.celebTapToContinue}';
+        c.appendChild(hint);
+
+        c.addEventListener('click', function() {
+          c.style.animation='fkFadeIn 0.3s ease-out reverse';
+          setTimeout(function(){if(c.parentNode)c.remove();},300);
+        }, true);
+
         document.body.appendChild(c);
-        setTimeout(function(){if(c.parentNode)c.style.animation='fkFadeIn 0.5s ease-out reverse';
-          setTimeout(function(){if(c.parentNode)c.remove();},500);},6000);
       })();
     ''';
   }

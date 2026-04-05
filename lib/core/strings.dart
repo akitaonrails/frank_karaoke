@@ -73,6 +73,7 @@ class S {
   static String get celebAlmostThere => _t('Almost There!', 'Quase Lá!');
   static String get celebKeepPracticing => _t('Keep Practicing!', 'Continue Praticando!');
   static String get celebPoints => _t('POINTS', 'PONTOS');
+  static String get celebTapToContinue => _t('Tap anywhere to continue', 'Toque para continuar');
 
   // --- Settings Panel ---
   static String get micPresetLabel => _t('MIC PRESET', 'PRESET DO MIC');
