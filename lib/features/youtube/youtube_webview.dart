@@ -56,10 +56,8 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
       if (mode != null) ref.read(scoringModeProvider.notifier).state = mode;
     }
     _welcomeDismissedPermanently = prefs.getBool('welcome_dismissed') ?? false;
-    final savedGate = prefs.getDouble('calibrated_noise_gate');
-    if (savedGate != null) ref.read(calibratedNoiseGateProvider.notifier).state = savedGate;
-    final savedSinging = prefs.getDouble('calibrated_singing_threshold');
-    if (savedSinging != null) ref.read(calibratedSingingThresholdProvider.notifier).state = savedSinging;
+    // Don't load saved calibration — it may be from a different device/mic.
+    // User should recalibrate on each device via the settings panel.
   }
 
   Future<void> _saveSetting(String key, String value) async {

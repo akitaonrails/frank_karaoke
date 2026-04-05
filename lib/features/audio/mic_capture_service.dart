@@ -65,12 +65,12 @@ class MicCaptureService {
           encoder: AudioEncoder.pcm16bits,
           sampleRate: kSampleRate,
           numChannels: 1,
-          autoGain: true,
-          // Disable echo cancellation on Android — it uses
-          // VOICE_COMMUNICATION mode which steals audio focus
-          // and can mute the speaker.
+          // Disable all Android audio preprocessors — they can
+          // aggressively filter the signal on some devices,
+          // leaving only silence/noise for pitch detection.
+          autoGain: false,
           echoCancel: false,
-          noiseSuppress: true,
+          noiseSuppress: false,
         ),
       );
 
@@ -96,10 +96,31 @@ class MicCaptureService {
 
     final samples = Float64List(bytes.length ~/ 2);
     final byteData = ByteData.sublistView(bytes);
+
+    // Find peak amplitude for auto-gain
+    double peak = 0;
     for (var i = 0; i < samples.length; i++) {
       final sample = byteData.getInt16(i * 2, Endian.little);
       samples[i] = sample / 32768.0;
+      final abs = samples[i].abs();
+      if (abs > peak) peak = abs;
     }
+
+    // Software gain: if peak is very low, amplify the signal.
+    // Android phone mics can produce extremely quiet PCM (~0.002 peak).
+    // Target peak ~0.3 for good pitch detection.
+    if (peak > 0.0001 && peak < 0.1) {
+      final gain = 0.3 / peak;
+      final clampedGain = gain > 50 ? 50.0 : gain; // max 50x
+      for (var i = 0; i < samples.length; i++) {
+        samples[i] *= clampedGain;
+      }
+      if (_frameCount <= 5) {
+        debugPrint('MicCapture: software gain ${clampedGain.toStringAsFixed(1)}x '
+            '(peak was ${peak.toStringAsFixed(4)})');
+      }
+    }
+
     _pcmController.add(samples);
   }
 

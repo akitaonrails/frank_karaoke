@@ -75,7 +75,7 @@ class ScoringSession {
         _pitchDetector = PitchDetector(),
         _voiceIsolator = VoiceIsolator(preset: preset),
         _noiseGateThreshold = calibratedNoiseGate ?? preset.noiseGateThreshold,
-        _singingThreshold = calibratedSingingThreshold ?? 0.04;
+        _singingThreshold = calibratedSingingThreshold ?? 0.0005;
 
   Stream<ScoringUpdate> get scoreStream => _scoreController.stream;
   bool get isActive => _isActive;
@@ -147,6 +147,11 @@ class ScoringSession {
     final rms = PitchDetector.rmsEnergy(samples);
     _processedFrames++;
 
+    if (_processedFrames <= 10 || _processedFrames % 200 == 0) {
+      debugPrint('Scoring: frame #$_processedFrames rms=${rms.toStringAsFixed(4)} '
+          'gate=$_noiseGateThreshold sing=$_singingThreshold');
+    }
+
     // Noise gate
     if (rms < _noiseGateThreshold) {
       _silentFrames++;
@@ -164,6 +169,9 @@ class ScoringSession {
     // Singing threshold
     if (rms < _singingThreshold) {
       if (_mode == ScoringMode.streak) _streakCount = 0;
+      if (_processedFrames <= 10 || _processedFrames % 200 == 0) {
+        debugPrint('Scoring: REJECTED by singing threshold');
+      }
       _emit(0, 0, '--', 0, 0, 0, rms);
       return;
     }
@@ -172,6 +180,10 @@ class ScoringSession {
     final result = _pitchDetector.detectPitchWithConfidence(samples);
     if (result.pitchHz < 60 || result.confidence < 0.3) {
       if (_mode == ScoringMode.streak) _streakCount = 0;
+      if (_processedFrames <= 10 || _processedFrames % 200 == 0) {
+        debugPrint('Scoring: REJECTED pitch=${result.pitchHz.toStringAsFixed(0)} '
+            'conf=${result.confidence.toStringAsFixed(2)}');
+      }
       _emit(0, 0, '--', 0, result.confidence, 0, rms);
       return;
     }
