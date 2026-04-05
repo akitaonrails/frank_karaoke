@@ -65,9 +65,12 @@ class ScoringSession {
   double _prevSingerPitch = 0;
   double _prevRefPitch = 0;
 
-  // Streak mode: combo counter and multiplier
+  // Streak mode
   int _streakCount = 0;
-  static const _streakThreshold = 0.4; // minimum frame score to continue streak
+  static const _streakThreshold = 0.4;
+
+  // Silence gap tracking — reset pitch history after prolonged silence
+  int _silentFrames = 0;
 
   ScoringSession({
     required MicCaptureService mic,
@@ -132,6 +135,7 @@ class ScoringSession {
     _prevSingerPitch = 0;
     _prevRefPitch = 0;
     _streakCount = 0;
+    _silentFrames = 0;
     _currentReferenceFrame = null;
     _voiceIsolator.reset();
     _isActive = true;
@@ -158,7 +162,16 @@ class ScoringSession {
     _processedFrames++;
 
     if (rms < _noiseGateThreshold) {
-      // Silence: freeze streak (don't break it — instrumental breaks are OK)
+      _silentFrames++;
+      // After ~0.5s of silence, reset pitch history so the next sung note
+      // isn't compared against the pre-pause note. This prevents contour
+      // and interval modes from penalizing correct re-entries after breaks.
+      if (_silentFrames > 12) {
+        _prevSingerMidi = 0;
+        _prevSingerPitch = 0;
+        _recentPitches.clear();
+        _singerContour.clear();
+      }
       _scoreController.add(ScoringUpdate(
         singerPitchHz: 0,
         referencePitchHz: _currentReferencePitchHz,
@@ -173,6 +186,7 @@ class ScoringSession {
       ));
       return;
     }
+    _silentFrames = 0;
 
     final pitchHz = _pitchDetector.detectPitch(samples);
     if (pitchHz < 60) {
