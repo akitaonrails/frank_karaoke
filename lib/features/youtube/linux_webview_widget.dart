@@ -290,11 +290,16 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
         );
         _overlayInjected = true;
         _lastInjectedScore = -1;
+        // Explicitly reset displayed scores to 0.
+        await _controller.evaluateJavascript(
+          source: WebviewOverlay.updateScoreJs(0, 0),
+        );
       } catch (e) {
         debugPrint('Overlay: injection failed: $e');
       }
     }
 
+    ref.read(currentScoreProvider.notifier).state = 0;
     _scoreSub = _scoringSession?.scoreStream.listen(_onScoreUpdate);
 
     _celebrationShown = false;
