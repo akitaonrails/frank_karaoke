@@ -158,8 +158,7 @@ class ScoringSession {
     _processedFrames++;
 
     if (rms < _noiseGateThreshold) {
-      // Silence breaks streak
-      if (_mode == ScoringMode.streak) _streakCount = 0;
+      // Silence: freeze streak (don't break it — instrumental breaks are OK)
       _scoreController.add(ScoringUpdate(
         singerPitchHz: 0,
         referencePitchHz: _currentReferencePitchHz,
@@ -177,6 +176,8 @@ class ScoringSession {
 
     final pitchHz = _pitchDetector.detectPitch(samples);
     if (pitchHz < 60) {
+      // Unpitched noise while mic is active — this DOES break streak
+      // (you're making sound but it's not singing)
       if (_mode == ScoringMode.streak) _streakCount = 0;
       _scoreController.add(ScoringUpdate(
         singerPitchHz: 0,
