@@ -17,5 +17,9 @@ final audioPresetProvider = StateProvider<AudioPreset>((ref) => AudioPreset.room
 final audioEffectProvider = StateProvider<AudioEffect>((ref) => AudioEffect.none);
 final pitchShiftProvider = StateProvider<int>((ref) => 0);
 
+// Session
+final participantsProvider = StateProvider<List<String>>((ref) => []);
+final sessionActiveProvider = StateProvider<bool>((ref) => false);
+
 // Scoring (placeholder for Phase 3)
 final currentScoreProvider = StateProvider<int>((ref) => 0);

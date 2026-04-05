@@ -18,7 +18,7 @@ void main() {
 
       expect(find.text("Tonight's Singers"), findsOneWidget);
       expect(find.text('Add Singer'), findsOneWidget);
-      expect(find.text('Start New Session'), findsOneWidget);
+      expect(find.text('Start Session'), findsOneWidget);
     });
   });
 
