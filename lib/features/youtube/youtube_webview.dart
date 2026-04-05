@@ -164,6 +164,11 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
               type:'seeked', time: v.currentTime
             }));
           });
+          v.addEventListener('timeupdate', function() {
+            FrankKaraoke.postMessage(JSON.stringify({
+              type:'timeupdate', time: v.currentTime
+            }));
+          });
         }
         document.querySelectorAll('video').forEach(guardVideo);
         window._fkVideoObserver = new MutationObserver(function() {
@@ -268,6 +273,9 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
           _onVideoPause();
         case 'seeked':
           _onVideoSeeked();
+        case 'timeupdate':
+          final time = (data['time'] as num?)?.toDouble() ?? 0;
+          _scoringSession?.updateVideoTime(time);
       }
     } catch (_) {}
   }

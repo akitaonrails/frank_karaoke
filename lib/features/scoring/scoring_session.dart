@@ -66,8 +66,8 @@ class ScoringSession {
   // Silence gap
   int _silentFrames = 0;
 
-  // Playback time tracking for pitch oracle
-  DateTime? _playbackStartTime;
+  // Video playback time (seconds), updated from JS bridge.
+  double _videoTimeSeconds = 0;
 
   // Totals for final score
   int _totalVoicedFrames = 0;
@@ -117,6 +117,11 @@ class ScoringSession {
   void setOracle(PitchOracle oracle) {
     _oracle = oracle;
     debugPrint('ScoringSession: oracle connected (${oracle.entryCount} entries)');
+  }
+
+  /// Update the current video playback time (called from JS bridge).
+  void updateVideoTime(double seconds) {
+    _videoTimeSeconds = seconds;
   }
 
   /// Pause scoring (video paused). Mic keeps running but frames are ignored.
@@ -185,7 +190,7 @@ class ScoringSession {
     _warmupDone = false;
     _isActive = true;
     _processedFrames = 0;
-    _playbackStartTime = DateTime.now();
+    _videoTimeSeconds = 0;
 
     // 5-second warmup: ignore initial noise/clicks from playback start.
     _warmupTimer?.cancel();
@@ -275,10 +280,9 @@ class ScoringSession {
     // Pitch oracle: determine if this is the singer or speaker bleed.
     double singerConf = 1.0; // assume singer unless oracle says otherwise
     final oracle = _oracle;
-    if (oracle != null && oracle.isReady && _playbackStartTime != null) {
-      final elapsed = DateTime.now().difference(_playbackStartTime!);
-      singerConf = oracle.singerConfidence(pitchHz, elapsed);
-      final refPitch = oracle.getPitchAt(elapsed);
+    if (oracle != null && oracle.isReady && _videoTimeSeconds > 0) {
+      singerConf = oracle.singerConfidence(pitchHz, _videoTimeSeconds);
+      final refPitch = oracle.getPitchAtSeconds(_videoTimeSeconds);
 
       // If the oracle says this is speaker bleed, skip it.
       if (singerConf < 0.3) {

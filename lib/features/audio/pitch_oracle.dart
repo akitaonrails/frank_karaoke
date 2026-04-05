@@ -1,7 +1,10 @@
+import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:audio_decoder/audio_decoder.dart';
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 import '../../core/constants.dart';
@@ -9,9 +12,9 @@ import 'pitch_detector.dart';
 
 /// Pitch oracle: knows what pitch the music is playing at any moment.
 ///
-/// Downloads the reference audio via youtube_explode_dart's authenticated
-/// stream client, decodes to PCM via audio_decoder (Android MediaCodec),
-/// and builds a pitch timeline for the entire song.
+/// Downloads reference audio, decodes to PCM, runs YIN pitch detection,
+/// and builds a timestamped pitch timeline. Results are cached locally
+/// by video ID so the same song never needs to be downloaded twice.
 ///
 /// Used to distinguish singer from speaker bleed:
 /// - mic pitch ≠ reference pitch → singer → score it
@@ -27,7 +30,7 @@ class PitchOracle {
   int get entryCount => _timeline.length;
 
   /// Build the pitch timeline for a video.
-  /// Uses youtube_explode_dart's stream client for authenticated download.
+  /// Checks cache first; downloads and decodes only if not cached.
   Future<bool> buildForVideo(String videoId, AudioStreamInfo streamInfo) async {
     if (_videoId == videoId && _isReady) return true;
     if (_isLoading) return false;
@@ -38,22 +41,28 @@ class PitchOracle {
     _videoId = videoId;
 
     try {
+      // Try loading from cache first.
+      if (await _loadFromCache(videoId)) {
+        _isReady = true;
+        _isLoading = false;
+        debugPrint('PitchOracle: loaded from cache, ${_timeline.length} entries');
+        return true;
+      }
+
+      // Download and decode.
       debugPrint('PitchOracle: downloading audio for $videoId...');
 
-      // Use youtube_explode_dart's authenticated HTTP client to download.
-      // Timeout after 30 seconds to prevent blocking forever.
       final yt = YoutubeExplode();
       final byteList = <int>[];
       var lastLog = DateTime.now();
       await for (final chunk in yt.videos.streamsClient.get(streamInfo).timeout(
-        const Duration(seconds: 30),
+        const Duration(seconds: 45),
         onTimeout: (sink) {
           debugPrint('PitchOracle: download timeout, using ${byteList.length} bytes');
           sink.close();
         },
       )) {
         byteList.addAll(chunk);
-        // Progress log every 2 seconds.
         final now = DateTime.now();
         if (now.difference(lastLog).inSeconds >= 2) {
           lastLog = now;
@@ -69,9 +78,9 @@ class PitchOracle {
       }
 
       final audioBytes = Uint8List.fromList(byteList);
-      debugPrint('PitchOracle: downloaded ${audioBytes.length} bytes total');
+      debugPrint('PitchOracle: downloaded ${audioBytes.length} bytes');
 
-      // Determine format hint from the stream info.
+      // Determine format from codec.
       final codec = streamInfo.codec.mimeType;
       String formatHint;
       if (codec.contains('opus') || codec.contains('webm')) {
@@ -79,11 +88,11 @@ class PitchOracle {
       } else if (codec.contains('mp4') || codec.contains('m4a') || codec.contains('aac')) {
         formatHint = 'm4a';
       } else {
-        formatHint = 'mp4'; // fallback
+        formatHint = 'mp4';
       }
-      debugPrint('PitchOracle: decoding ($formatHint, $codec)...');
+      debugPrint('PitchOracle: decoding ($formatHint)...');
 
-      // Decode to raw 16-bit mono PCM using audio_decoder (MediaCodec).
+      // Decode to raw 16-bit mono PCM.
       final pcmBytes = await AudioDecoder.convertToWavBytes(
         audioBytes,
         formatHint: formatHint,
@@ -95,7 +104,7 @@ class PitchOracle {
 
       debugPrint('PitchOracle: decoded ${pcmBytes.length} PCM bytes');
 
-      // Convert to Float64.
+      // Convert to Float64 and build timeline.
       final numSamples = pcmBytes.length ~/ 2;
       final samples = Float64List(numSamples);
       final byteData = ByteData.sublistView(pcmBytes);
@@ -103,8 +112,10 @@ class PitchOracle {
         samples[i] = byteData.getInt16(i * 2, Endian.little) / 32768.0;
       }
 
-      // Build pitch timeline with standard threshold (0.15) for clean audio.
       _buildTimeline(samples, kSampleRate);
+
+      // Save to cache.
+      await _saveToCache(videoId);
 
       _isReady = true;
       _isLoading = false;
@@ -118,11 +129,11 @@ class PitchOracle {
     }
   }
 
-  /// Get the reference pitch at a given playback timestamp.
-  double getPitchAt(Duration timestamp) {
+  /// Get the reference pitch at a given playback position (seconds).
+  double getPitchAtSeconds(double seconds) {
     if (!_isReady || _timeline.isEmpty) return 0;
 
-    final ms = timestamp.inMilliseconds;
+    final ms = (seconds * 1000).round();
     var lo = 0, hi = _timeline.length - 1;
     while (lo < hi) {
       final mid = (lo + hi) ~/ 2;
@@ -140,10 +151,11 @@ class PitchOracle {
   }
 
   /// Singer confidence: 0.0 (speaker bleed) to 1.0 (singer).
-  double singerConfidence(double micPitchHz, Duration timestamp) {
+  /// Uses video currentTime (seconds) for accurate sync.
+  double singerConfidence(double micPitchHz, double videoTimeSeconds) {
     if (!_isReady) return 0.5;
 
-    final refPitch = getPitchAt(timestamp);
+    final refPitch = getPitchAtSeconds(videoTimeSeconds);
     if (refPitch <= 0) return 1.0; // music is silent = definitely singer
 
     final micMidi = 69 + 12 * _log2(micPitchHz / 440);
@@ -156,8 +168,47 @@ class PitchOracle {
     return (dist / 2.0).clamp(0.0, 1.0);
   }
 
+  // --- Cache ---
+
+  Future<File> _cacheFile(String videoId) async {
+    final dir = await getApplicationCacheDirectory();
+    final cacheDir = Directory('${dir.path}/pitch_oracle');
+    if (!cacheDir.existsSync()) cacheDir.createSync(recursive: true);
+    return File('${cacheDir.path}/$videoId.json');
+  }
+
+  Future<bool> _loadFromCache(String videoId) async {
+    try {
+      final file = await _cacheFile(videoId);
+      if (!file.existsSync()) return false;
+
+      final json = jsonDecode(await file.readAsString());
+      final entries = json['entries'] as List;
+      _timeline.clear();
+      for (final e in entries) {
+        _timeline.add(_PitchEntry(e['t'] as int, (e['p'] as num).toDouble()));
+      }
+      return _timeline.isNotEmpty;
+    } catch (e) {
+      debugPrint('PitchOracle: cache load error: $e');
+      return false;
+    }
+  }
+
+  Future<void> _saveToCache(String videoId) async {
+    try {
+      final file = await _cacheFile(videoId);
+      final entries = _timeline.map((e) => {'t': e.timestampMs, 'p': e.pitchHz}).toList();
+      await file.writeAsString(jsonEncode({'videoId': videoId, 'entries': entries}));
+      debugPrint('PitchOracle: cached ${_timeline.length} entries');
+    } catch (e) {
+      debugPrint('PitchOracle: cache save error: $e');
+    }
+  }
+
+  // --- Timeline building ---
+
   void _buildTimeline(Float64List samples, int sampleRate) {
-    // Use strict threshold (0.15) for clean reference audio.
     final detector = PitchDetector(sampleRate: sampleRate, threshold: 0.15);
     final frameSize = kFrameSize;
     final hopSize = frameSize ~/ 2;
