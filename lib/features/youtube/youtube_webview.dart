@@ -525,6 +525,16 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
         : (current - 1).clamp(kPitchShiftMin, kPitchShiftMax);
     ref.read(pitchShiftProvider.notifier).state = next;
     if (_overlayInjected) _runJs(WebviewOverlay.updatePitchShiftJs(next));
+    // Pitch-shift the video audio by adjusting playbackRate with
+    // preservesPitch=false. Semitones to rate: 2^(semitones/12).
+    _runJs('''
+      (function(){
+        var v=document.querySelector('video');
+        if(!v)return;
+        v.preservesPitch=false;
+        v.playbackRate=Math.pow(2,$next/12);
+      })();
+    ''');
   }
 
   Future<void> _calibrateMic() async {
