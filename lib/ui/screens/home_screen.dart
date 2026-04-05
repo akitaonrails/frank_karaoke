@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import '../../core/constants.dart';
 import '../../features/youtube/linux_webview_widget.dart';
 import '../../features/youtube/youtube_webview.dart';
-import 'settings_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -14,32 +13,7 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Stack(
-        children: [
-          _buildWebView(),
-
-          // Settings gear button (top right)
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 8,
-            right: 8,
-            child: Material(
-              color: Colors.black54,
-              shape: const CircleBorder(),
-              clipBehavior: Clip.antiAlias,
-              child: IconButton(
-                icon: const Icon(Icons.settings, color: kAccentGlow),
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                  );
-                },
-                tooltip: 'Settings',
-                iconSize: 28,
-              ),
-            ),
-          ),
-        ],
-      ),
+      body: _buildWebView(),
     );
   }
 

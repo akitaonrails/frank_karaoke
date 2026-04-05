@@ -54,6 +54,64 @@ class WebviewOverlay {
 
       overlay.appendChild(noteBox);
 
+      // Settings gear button (below note box, clickable)
+      var gearBtn = document.createElement('div');
+      gearBtn.id = 'fk-settings-btn';
+      gearBtn.textContent = '\\u2699';
+      gearBtn.style.cssText = 'position:fixed;top:58px;right:14px;z-index:100000;'
+        + 'width:40px;height:40px;border-radius:50%;'
+        + 'background:rgba(0,0,0,0.7);color:rgba(255,255,255,0.6);'
+        + 'font-size:22px;display:flex;align-items:center;justify-content:center;'
+        + 'cursor:pointer;pointer-events:auto;'
+        + 'border:1px solid rgba(255,255,255,0.15);'
+        + 'transition:all 0.2s ease;';
+      gearBtn.addEventListener('mouseenter', function() {
+        gearBtn.style.color = '#00d2ff';
+        gearBtn.style.borderColor = 'rgba(0,210,255,0.5)';
+        gearBtn.style.boxShadow = '0 0 15px rgba(0,210,255,0.3)';
+      });
+      gearBtn.addEventListener('mouseleave', function() {
+        gearBtn.style.color = 'rgba(255,255,255,0.6)';
+        gearBtn.style.borderColor = 'rgba(255,255,255,0.15)';
+        gearBtn.style.boxShadow = 'none';
+      });
+      gearBtn.addEventListener('click', function() {
+        if (window.webkit && window.webkit.messageHandlers &&
+            window.webkit.messageHandlers.FrankSettings) {
+          window.webkit.messageHandlers.FrankSettings.postMessage('open');
+        }
+      });
+      overlay.appendChild(gearBtn);
+
+      // Restart button (below settings gear)
+      var restartBtn = document.createElement('div');
+      restartBtn.id = 'fk-restart-btn';
+      restartBtn.textContent = '\\u21BB';
+      restartBtn.style.cssText = 'position:fixed;top:104px;right:14px;z-index:100000;'
+        + 'width:40px;height:40px;border-radius:50%;'
+        + 'background:rgba(0,0,0,0.7);color:rgba(255,255,255,0.6);'
+        + 'font-size:22px;display:flex;align-items:center;justify-content:center;'
+        + 'cursor:pointer;pointer-events:auto;'
+        + 'border:1px solid rgba(255,255,255,0.15);'
+        + 'transition:all 0.2s ease;';
+      restartBtn.addEventListener('mouseenter', function() {
+        restartBtn.style.color = '#ff9f43';
+        restartBtn.style.borderColor = 'rgba(255,159,67,0.5)';
+        restartBtn.style.boxShadow = '0 0 15px rgba(255,159,67,0.3)';
+      });
+      restartBtn.addEventListener('mouseleave', function() {
+        restartBtn.style.color = 'rgba(255,255,255,0.6)';
+        restartBtn.style.borderColor = 'rgba(255,255,255,0.15)';
+        restartBtn.style.boxShadow = 'none';
+      });
+      restartBtn.addEventListener('click', function() {
+        if (window.webkit && window.webkit.messageHandlers &&
+            window.webkit.messageHandlers.FrankRestart) {
+          window.webkit.messageHandlers.FrankRestart.postMessage('restart');
+        }
+      });
+      overlay.appendChild(restartBtn);
+
       // Score display (bottom right)
       var scoreBox = document.createElement('div');
       scoreBox.id = 'fk-score';

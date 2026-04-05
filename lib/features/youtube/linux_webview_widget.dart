@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../state/providers.dart';
+import '../../ui/screens/settings_screen.dart';
 import '../overlay/webview_overlay.dart';
 import '../scoring/scoring_session.dart';
 import 'linux_webview_controller.dart';
@@ -45,7 +46,16 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
   Future<void> _createWebView() async {
     await _controller.create(url: widget.initialUrl);
     _created = true;
-    // Full screen — no bottom inset needed anymore.
+
+    // Register JS handlers for overlay buttons.
+    _controller.addJavaScriptHandler(
+      handlerName: 'FrankSettings',
+      callback: (_) => _openSettings(),
+    );
+    _controller.addJavaScriptHandler(
+      handlerName: 'FrankRestart',
+      callback: (_) => _restartScoring(),
+    );
   }
 
   void _onEvent(dynamic event) {
@@ -215,6 +225,31 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
     _controller.evaluateJavascript(
       source: WebviewOverlay.updateNoteAndRmsJs(noteName, normalizedRms),
     );
+  }
+
+  void _openSettings() {
+    if (!mounted) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const SettingsScreen(),
+      ),
+    );
+  }
+
+  Future<void> _restartScoring() async {
+    if (!_created) return;
+    // Reload the video from the start.
+    await _controller.evaluateJavascript(
+      source: '''
+        (function() {
+          var v = document.querySelector('video');
+          if (v) { v.currentTime = 0; v.play(); }
+        })();
+      ''',
+    );
+    // Restart scoring fresh.
+    await _stopScoring();
+    _startScoring();
   }
 
   Future<void> _stopScoring() async {
