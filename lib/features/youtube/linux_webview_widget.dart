@@ -67,7 +67,14 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       case 'onLoadStop':
         final url = data is Map ? data['url'] as String? : null;
         if (url != null) _onUrlChange(url);
-        if (_overlayInjected) _reinjectOverlay();
+        if (_overlayInjected) {
+          _reinjectOverlay();
+        } else {
+          // Always show settings gear, even on non-video pages.
+          _controller.evaluateJavascript(
+            source: WebviewOverlay.injectSettingsOnlyJs,
+          );
+        }
       case 'onUpdateVisitedHistory':
         final url = data is Map ? data['url'] as String? : null;
         if (url != null) _onUrlChange(url);
