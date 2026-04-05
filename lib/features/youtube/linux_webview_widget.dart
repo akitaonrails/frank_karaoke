@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:math' as math;
+import 'dart:math' as math show log, sqrt;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -68,6 +68,14 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       }
     }
     _welcomeDismissedPermanently = prefs.getBool('welcome_dismissed') ?? false;
+    final savedGate = prefs.getDouble('calibrated_noise_gate');
+    if (savedGate != null) {
+      ref.read(calibratedNoiseGateProvider.notifier).state = savedGate;
+    }
+    final savedSinging = prefs.getDouble('calibrated_singing_threshold');
+    if (savedSinging != null) {
+      ref.read(calibratedSingingThresholdProvider.notifier).state = savedSinging;
+    }
   }
 
   Future<void> _saveSetting(String key, String value) async {
@@ -90,6 +98,10 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
     _controller.addJavaScriptHandler(
       handlerName: 'FrankMode',
       callback: (args) => _onModeChange(args.isNotEmpty ? args[0] : ''),
+    );
+    _controller.addJavaScriptHandler(
+      handlerName: 'FrankCalibrate',
+      callback: (_) => _calibrateMic(),
     );
     _controller.addJavaScriptHandler(
       handlerName: 'FrankRestart',
@@ -120,6 +132,90 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
     _welcomeDismissedPermanently = true;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('welcome_dismissed', true);
+  }
+
+  Future<void> _calibrateMic() async {
+    if (!_created) return;
+
+    // Show progress on the button.
+    _controller.evaluateJavascript(
+      source: WebviewOverlay.updateCalibrateJs(
+        '\\u{1F399} Stay quiet... 3s', active: true),
+    );
+
+    // Start mic if not already running.
+    final mic = ref.read(micCaptureServiceProvider);
+    final wasRecording = mic.isRecording;
+    if (!wasRecording) {
+      final started = await mic.start();
+      if (!started) {
+        _controller.evaluateJavascript(
+          source: WebviewOverlay.updateCalibrateJs('\\u{274C} Mic unavailable'),
+        );
+        return;
+      }
+    }
+
+    // Collect RMS values for 3 seconds.
+    final rmsValues = <double>[];
+    final sub = mic.pcmStream.listen((samples) {
+      double sum = 0;
+      for (final s in samples) { sum += s * s; }
+      final rms = sum > 0 ? math.sqrt(sum / samples.length) : 0.0;
+      rmsValues.add(rms);
+    });
+
+    // Countdown.
+    for (var i = 2; i >= 0; i--) {
+      await Future.delayed(const Duration(seconds: 1));
+      if (_created && i > 0) {
+        _controller.evaluateJavascript(
+          source: WebviewOverlay.updateCalibrateJs(
+            '\\u{1F399} Stay quiet... ${i}s', active: true),
+        );
+      }
+    }
+
+    await sub.cancel();
+    if (!wasRecording) await mic.stop();
+
+    if (rmsValues.isEmpty) {
+      _controller.evaluateJavascript(
+        source: WebviewOverlay.updateCalibrateJs('\\u{274C} No data'),
+      );
+      return;
+    }
+
+    // Calculate ambient level: use the 90th percentile (not max, to ignore spikes).
+    rmsValues.sort();
+    final p90 = rmsValues[(rmsValues.length * 0.9).floor()];
+
+    // Noise gate: 2x ambient level (anything above this is intentional sound).
+    final noiseGate = p90 * 2.0;
+    // Singing threshold: 4x ambient (must be clearly louder than background).
+    final singingThreshold = p90 * 4.0;
+
+    // Save and apply.
+    ref.read(calibratedNoiseGateProvider.notifier).state = noiseGate;
+    ref.read(calibratedSingingThresholdProvider.notifier).state = singingThreshold;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('calibrated_noise_gate', noiseGate);
+    await prefs.setDouble('calibrated_singing_threshold', singingThreshold);
+
+    final gatePct = (noiseGate * 1000).toStringAsFixed(1);
+    debugPrint('Calibration: ambient p90=${p90.toStringAsFixed(4)}, '
+        'gate=$noiseGate, singing=$singingThreshold');
+
+    _controller.evaluateJavascript(
+      source: WebviewOverlay.updateCalibrateJs(
+        '\\u{2705} Calibrated (${gatePct}m)'),
+    );
+
+    // Restart scoring with new thresholds.
+    if (_scoringSession != null) {
+      _restartScoring();
+    }
   }
 
   void _onModeChange(dynamic modeId) {
@@ -254,7 +350,15 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
     final preset = ref.read(audioPresetProvider);
 
     final mode = ref.read(scoringModeProvider);
-    _scoringSession = ScoringSession(mic: mic, preset: preset, mode: mode);
+    final calGate = ref.read(calibratedNoiseGateProvider);
+    final calSinging = ref.read(calibratedSingingThresholdProvider);
+    _scoringSession = ScoringSession(
+      mic: mic,
+      preset: preset,
+      mode: mode,
+      calibratedNoiseGate: calGate,
+      calibratedSingingThreshold: calSinging,
+    );
 
     // Start reference audio analyzer if we have a URL.
     if (refAudioUrl != null) {

@@ -52,6 +52,13 @@ class WebviewOverlay {
           title: 'Gear icon = settings',
           text: 'Top-left corner. Set your mic type, switch scoring mode, '
             + 'and shift pitch up/down for songs outside your range.'
+        },
+        {
+          icon: '\\u{1F399}',
+          title: 'Calibrate your mic first',
+          text: 'Open settings and tap Calibrate Mic. Stay quiet for 3 seconds '
+            + 'so the app learns your room noise level. This makes scoring accurate '
+            + 'in any environment.'
         }
       ];
 
@@ -447,6 +454,31 @@ class WebviewOverlay {
       restartBtn.addEventListener('mousedown', function(e){ e.stopPropagation(); }, true);
       panel.appendChild(restartBtn);
 
+      // Calibrate mic button
+      var calBtn = document.createElement('div');
+      calBtn.id = 'fk-calibrate-btn';
+      calBtn.textContent = '\\u{1F399} Calibrate Mic';
+      calBtn.style.cssText = 'padding:10px;border-radius:10px;margin-top:8px;'
+        + 'background:rgba(0,210,255,0.1);border:1px solid rgba(0,210,255,0.25);'
+        + 'color:rgba(0,210,255,0.8);font-size:13px;font-weight:600;text-align:center;'
+        + 'cursor:pointer;user-select:none;-webkit-user-select:none;transition:all 0.2s;';
+      calBtn.addEventListener('mouseenter', function() {
+        calBtn.style.background = 'rgba(0,210,255,0.2)';
+      });
+      calBtn.addEventListener('mouseleave', function() {
+        if (!window._fkCalibrating) calBtn.style.background = 'rgba(0,210,255,0.1)';
+      });
+      calBtn.addEventListener('click', function(e) {
+        e.stopPropagation(); e.preventDefault();
+        if (window._fkCalibrating) return;
+        if (window.webkit && window.webkit.messageHandlers &&
+            window.webkit.messageHandlers.FrankCalibrate) {
+          window.webkit.messageHandlers.FrankCalibrate.postMessage('start');
+        }
+      }, true);
+      calBtn.addEventListener('mousedown', function(e){ e.stopPropagation(); }, true);
+      panel.appendChild(calBtn);
+
       overlay.appendChild(panel);
       document.body.appendChild(overlay);
 
@@ -490,6 +522,20 @@ class WebviewOverlay {
           btn.style.color = 'rgba(255,255,255,0.5)';
         }
       }
+    })();
+  ''';
+
+  /// Update calibration button state.
+  static String updateCalibrateJs(String text, {bool active = false}) => '''
+    (function() {
+      var btn = document.getElementById('fk-calibrate-btn');
+      if (!btn) return;
+      btn.textContent = '$text';
+      window._fkCalibrating = $active;
+      btn.style.background = $active
+        ? 'rgba(0,210,255,0.3)'
+        : 'rgba(0,210,255,0.1)';
+      btn.style.cursor = $active ? 'wait' : 'pointer';
     })();
   ''';
 

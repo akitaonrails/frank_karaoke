@@ -21,6 +21,11 @@ final pitchShiftProvider = StateProvider<int>((ref) => 0);
 final scoringModeProvider = StateProvider<ScoringMode>((ref) => ScoringMode.pitchClass);
 final currentScoreProvider = StateProvider<int>((ref) => 0);
 
+// Calibrated noise gate (null = use preset default)
+final calibratedNoiseGateProvider = StateProvider<double?>((ref) => null);
+// Calibrated singing threshold (null = use default 0.04)
+final calibratedSingingThresholdProvider = StateProvider<double?>((ref) => null);
+
 // Services
 final youtubeAudioServiceProvider = Provider<YouTubeAudioService>((ref) {
   final service = YouTubeAudioService();

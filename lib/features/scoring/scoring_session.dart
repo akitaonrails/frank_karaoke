@@ -23,6 +23,7 @@ class ScoringSession {
   final PitchDetector _pitchDetector;
   final VoiceIsolator _voiceIsolator;
   final double _noiseGateThreshold;
+  final double _singingThreshold;
   final ScoringMode _mode;
 
   StreamSubscription<Float64List>? _micSub;
@@ -75,11 +76,14 @@ class ScoringSession {
     required MicCaptureService mic,
     required AudioPreset preset,
     required ScoringMode mode,
+    double? calibratedNoiseGate,
+    double? calibratedSingingThreshold,
   })  : _mic = mic,
         _mode = mode,
         _pitchDetector = PitchDetector(),
         _voiceIsolator = VoiceIsolator(preset: preset),
-        _noiseGateThreshold = preset.noiseGateThreshold;
+        _noiseGateThreshold = calibratedNoiseGate ?? preset.noiseGateThreshold,
+        _singingThreshold = calibratedSingingThreshold ?? 0.04;
 
   Stream<ScoringUpdate> get scoreStream => _scoreController.stream;
   bool get isActive => _isActive;
@@ -188,9 +192,9 @@ class ScoringSession {
     _silentFrames = 0;
 
     // Require a strong enough signal to be actual singing, not just
-    // ambient noise that passed the gate. Singing RMS is typically > 0.05.
-    // This prevents the score from starting at 70 from room noise.
-    final isSinging = rms > 0.04;
+    // ambient noise that passed the gate. Threshold is set by calibration
+    // or defaults to 0.04. Prevents score inflation from room noise.
+    final isSinging = rms > _singingThreshold;
 
     final pitchHz = _pitchDetector.detectPitch(samples);
     if (pitchHz < 60 || !isSinging) {
