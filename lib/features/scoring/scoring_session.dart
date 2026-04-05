@@ -11,7 +11,13 @@ import '../audio/reference_audio_analyzer.dart';
 import '../audio/voice_isolator.dart';
 import 'scoring_engine.dart';
 
-/// Karaoke scoring with pluggable strategies and pitch confidence gating.
+/// Karaoke scoring.
+///
+/// WITH reference (Android): 4 modes compare singer vs music.
+/// WITHOUT reference (Linux): single combined voice quality score
+/// that rewards clean pitch, melodic movement, and good technique.
+/// The mode selector still works but all modes use the same combined
+/// algorithm — mode selection is saved for when reference is available.
 class ScoringSession {
   final MicCaptureService _mic;
   final PitchDetector _pitchDetector;
@@ -30,24 +36,16 @@ class ScoringSession {
   StreamSubscription<ReferencePitchFrame>? _refSub;
   Float64List? _currentReferenceFrame;
 
-  // EMA for live score — alpha=0.15 for fast response (~7 frames to reflect)
+  // EMA for live score
   double _emaScore = 0;
   bool _emaInitialized = false;
   static const _emaAlpha = 0.15;
 
-  // Stability: rolling MIDI values
+  // Pitch history
   final List<double> _recentPitches = [];
-  static const _stabilityWindowSize = 15;
+  static const _historySize = 15;
 
-  // Dynamics: rolling RMS
-  final List<double> _recentRms = [];
-  static const _dynamicsWindowSize = 50;
-
-  // Totals for final score
-  int _totalVoicedFrames = 0;
-  double _allTimeScoreSum = 0;
-
-  // Contour state
+  // Contour state (for reference mode)
   final List<double> _singerContour = [];
   final List<double> _refContour = [];
   static const _contourWindowSize = 20;
@@ -61,8 +59,12 @@ class ScoringSession {
   // Streak
   int _streakCount = 0;
 
-  // Silence gap tracking
+  // Silence gap
   int _silentFrames = 0;
+
+  // Totals for final score
+  int _totalVoicedFrames = 0;
+  double _allTimeScoreSum = 0;
 
   ScoringSession({
     required MicCaptureService mic,
@@ -120,9 +122,6 @@ class ScoringSession {
     _emaScore = 0;
     _emaInitialized = false;
     _recentPitches.clear();
-    _recentRms.clear();
-    _totalVoicedFrames = 0;
-    _allTimeScoreSum = 0;
     _singerContour.clear();
     _refContour.clear();
     _prevSingerMidi = 0;
@@ -131,13 +130,16 @@ class ScoringSession {
     _prevRefPitch = 0;
     _streakCount = 0;
     _silentFrames = 0;
+    _totalVoicedFrames = 0;
+    _allTimeScoreSum = 0;
     _currentReferenceFrame = null;
     _voiceIsolator.reset();
     _isActive = true;
     _processedFrames = 0;
 
     _micSub = _mic.pcmStream.listen(_onMicFrame);
-    debugPrint('ScoringSession: started mode=${_mode.name}');
+    debugPrint('ScoringSession: started mode=${_mode.name} '
+        'ref=${_hasReference ? "yes" : "no"}');
     return true;
   }
 
@@ -152,11 +154,9 @@ class ScoringSession {
     );
 
     final rms = PitchDetector.rmsEnergy(samples);
-    _recentRms.add(rms);
-    if (_recentRms.length > _dynamicsWindowSize) _recentRms.removeAt(0);
     _processedFrames++;
 
-    // --- Noise gate: skip silent frames ---
+    // Noise gate
     if (rms < _noiseGateThreshold) {
       _silentFrames++;
       if (_silentFrames > 12) {
@@ -165,62 +165,47 @@ class ScoringSession {
         _recentPitches.clear();
         _singerContour.clear();
       }
-      _emitUpdate(0, 0, '--', 0, 0, 0, rms);
+      _emit(0, 0, '--', 0, 0, 0, rms);
       return;
     }
     _silentFrames = 0;
 
-    // --- Singing threshold: require actual vocal volume ---
-    final isSinging = rms > _singingThreshold;
-
-    // --- Pitch detection with confidence ---
-    final pitchResult = _pitchDetector.detectPitchWithConfidence(samples);
-    final pitchHz = pitchResult.pitchHz;
-    final confidence = pitchResult.confidence;
-
-    if (pitchHz < 60 || !isSinging || confidence < 0.3) {
+    // Singing threshold
+    if (rms < _singingThreshold) {
       if (_mode == ScoringMode.streak) _streakCount = 0;
-      _emitUpdate(0, 0, '--', 0, 0, 0, rms);
+      _emit(0, 0, '--', 0, 0, 0, rms);
       return;
     }
 
-    final singerMidi = hzToMidi(pitchHz);
-    final refMidi = _currentReferencePitchHz > 60
-        ? hzToMidi(_currentReferencePitchHz)
-        : 0.0;
-
-    // --- Update pitch history ---
-    _recentPitches.add(singerMidi);
-    if (_recentPitches.length > _stabilityWindowSize) _recentPitches.removeAt(0);
-
-    // --- Compute stability ---
-    double stability = 0.5;
-    if (_recentPitches.length >= 3) {
-      final mean = _recentPitches.reduce((a, b) => a + b) / _recentPitches.length;
-      final variance = _recentPitches
-          .map((p) => (p - mean) * (p - mean))
-          .reduce((a, b) => a + b) / _recentPitches.length;
-      final stddev = math.sqrt(variance);
-      // stddev 0 = perfectly stable = 1.0
-      // stddev 1 = some wobble = 0.5
-      // stddev 3+ = very unstable = 0.0
-      stability = (1.0 - stddev / 3.0).clamp(0.0, 1.0);
+    // Pitch detection
+    final result = _pitchDetector.detectPitchWithConfidence(samples);
+    if (result.pitchHz < 60 || result.confidence < 0.3) {
+      if (_mode == ScoringMode.streak) _streakCount = 0;
+      _emit(0, 0, '--', 0, result.confidence, 0, rms);
+      return;
     }
 
-    // --- Primary score ---
-    final primaryScore = _computePrimaryScore(singerMidi, refMidi, pitchHz);
+    final pitchHz = result.pitchHz;
+    final confidence = result.confidence;
+    final singerMidi = hzToMidi(pitchHz);
 
-    // --- Frame score = primary score directly ---
-    // Confidence is used only as a gate (< 0.3 rejected above).
-    // Once past the gate, the primary score stands on its own.
+    // Update pitch history
+    _recentPitches.add(singerMidi);
+    if (_recentPitches.length > _historySize) _recentPitches.removeAt(0);
+
+    // Compute score
+    final primaryScore = _hasReference
+        ? _scoreWithReference(singerMidi, pitchHz)
+        : _scoreVoiceOnly(singerMidi, pitchHz, confidence);
+
     var frameScore = primaryScore;
 
-    // --- Streak combo ---
+    // Streak combo
     if (_mode == ScoringMode.streak) {
-      if (primaryScore >= 0.5) {
+      if (frameScore >= 0.4) {
         _streakCount++;
-        final bonus = math.min(_streakCount, 30) / 75.0;
-        frameScore = (frameScore + bonus).clamp(0.0, 1.0);
+        frameScore = (frameScore + math.min(_streakCount, 30) / 75.0)
+            .clamp(0.0, 1.0);
       } else {
         if (_streakCount > 5) frameScore = 0.05;
         _streakCount = 0;
@@ -229,73 +214,107 @@ class ScoringSession {
 
     _pushScore(frameScore);
 
-    // Update state for next frame
+    // Update state
     _prevSingerPitch = pitchHz;
     _prevSingerMidi = singerMidi;
     if (_currentReferencePitchHz > 60) {
       _prevRefPitch = _currentReferencePitchHz;
-      _prevRefMidi = refMidi;
+      _prevRefMidi = hzToMidi(_currentReferencePitchHz);
     }
 
     // Note name
-    final nearestNote = singerMidi.roundToDouble();
-    final noteIndex = nearestNote.round() % 12;
-    final octave = (nearestNote.round() ~/ 12) - 1;
+    final nn = singerMidi.round();
     const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-    final noteName = '${names[noteIndex]}$octave';
+    final noteName = '${names[nn % 12]}${nn ~/ 12 - 1}';
 
     if (_processedFrames <= 5 || _processedFrames % 100 == 0) {
       debugPrint('Scoring[${_mode.name}]: #$_processedFrames '
           'primary=${primaryScore.toStringAsFixed(2)} '
           'conf=${confidence.toStringAsFixed(2)} '
-          'stab=${stability.toStringAsFixed(2)} '
           'frame=${frameScore.toStringAsFixed(2)} '
           'live=$currentScore overall=$finalScore '
           'streak=$_streakCount '
           'singer=${pitchHz.toStringAsFixed(0)}Hz');
     }
 
-    _emitUpdate(pitchHz, primaryScore, noteName, stability, confidence,
-        frameScore, rms);
+    _emit(pitchHz, primaryScore, noteName, 0, confidence, frameScore, rms);
   }
 
-  void _emitUpdate(double pitchHz, double primary, String noteName,
-      double stability, double confidence, double frameScore, double rms) {
-    _scoreController.add(ScoringUpdate(
-      singerPitchHz: pitchHz,
-      referencePitchHz: _currentReferencePitchHz,
-      noteName: noteName,
-      primaryScore: primary,
-      stabilityScore: stability,
-      confidence: confidence,
-      frameScore: frameScore,
-      totalScore: currentScore,
-      overallScore: finalScore,
-      rmsEnergy: rms,
-      streakCount: _streakCount,
-    ));
-  }
+  // =====================================================
+  // VOICE-ONLY SCORING (Linux, no reference)
+  // =====================================================
+  // Combined score from 3 signals:
+  // 1. Confidence (40%): how "sung" vs "spoken" is this sound?
+  //    Clear tonal singing = high confidence. Speech/noise = low.
+  // 2. Pitch cleanliness (30%): how close to a clean note center?
+  //    But use confidence-weighted snap, not raw deviation.
+  // 3. Musicality (30%): is the singer creating musical patterns?
+  //    Measured by pitch range + interval quality over recent history.
 
-  // ===== SCORING MODES =====
+  double _scoreVoiceOnly(double singerMidi, double pitchHz, double confidence) {
+    // 1. Confidence score: directly rewards singing-like sounds.
+    // conf 0.3 (gate minimum) = 0.0, conf 0.9 = 1.0
+    final confScore = ((confidence - 0.3) / 0.6).clamp(0.0, 1.0);
 
-  double _computePrimaryScore(double singerMidi, double refMidi, double pitchHz) {
-    if (_hasReference && refMidi > 0) {
-      return switch (_mode) {
-        ScoringMode.pitchClass || ScoringMode.streak =>
-          _refPitchClass(singerMidi, refMidi),
-        ScoringMode.contour => _refContourScore(singerMidi, refMidi),
-        ScoringMode.interval => _refIntervalScore(singerMidi, refMidi),
-      };
+    // 2. Pitch cleanliness: deviation from nearest note.
+    // Weighted by confidence — low-confidence detections shouldn't
+    // get credit for accidentally landing near a note.
+    final deviation = (singerMidi - singerMidi.roundToDouble()).abs() * 100;
+    final rawSnap = (1.0 - deviation / 40.0).clamp(0.0, 1.0);
+    final cleanScore = rawSnap * confScore; // only counts if confident
+
+    // 3. Musicality: pitch variety + interval quality
+    double musicalScore = 0.3; // default
+    if (_recentPitches.length >= 5) {
+      final maxP = _recentPitches.reduce(math.max);
+      final minP = _recentPitches.reduce(math.min);
+      final range = maxP - minP;
+
+      // Range: 0 = monotone (0.0), 2-5 semitones = sweet spot (1.0)
+      double rangeScore;
+      if (range < 0.5) {
+        rangeScore = 0.0;
+      } else if (range <= 6.0) {
+        rangeScore = (range / 6.0).clamp(0.0, 1.0);
+      } else {
+        rangeScore = math.max(0.3, 1.0 - (range - 6.0) / 10.0);
+      }
+
+      // Interval quality: current jump
+      double intervalScore = 0.5;
+      if (_prevSingerPitch > 0) {
+        final interval = (singerMidi - hzToMidi(_prevSingerPitch)).abs();
+        if (interval < 0.3) {
+          intervalScore = 0.6; // holding a note
+        } else if (interval <= 5.0) {
+          intervalScore = 1.0; // musical step/third
+        } else if (interval <= 8.0) {
+          intervalScore = 0.4; // wide jump
+        } else {
+          intervalScore = 0.1; // wild
+        }
+      }
+
+      musicalScore = rangeScore * 0.5 + intervalScore * 0.5;
     }
+
+    final combined = confScore * 0.40 + cleanScore * 0.30 + musicalScore * 0.30;
+    return combined.clamp(0.0, 1.0);
+  }
+
+  // =====================================================
+  // WITH-REFERENCE SCORING (Android)
+  // =====================================================
+
+  double _scoreWithReference(double singerMidi, double pitchHz) {
+    final refMidi = hzToMidi(_currentReferencePitchHz);
     return switch (_mode) {
       ScoringMode.pitchClass || ScoringMode.streak =>
-        _voicePitchStability(singerMidi),
-      ScoringMode.contour => _voiceContourMelody(singerMidi),
-      ScoringMode.interval => _voiceIntervalQuality(singerMidi),
+        _refPitchClass(singerMidi, refMidi),
+      ScoringMode.contour => _refContourScore(singerMidi, refMidi),
+      ScoringMode.interval => _refIntervalScore(singerMidi, refMidi),
     };
   }
-
-  // --- With reference (Android) ---
 
   double _refPitchClass(double singerMidi, double refMidi) {
     final singerClass = singerMidi % 12;
@@ -334,96 +353,23 @@ class ScoringSession {
     return (1.0 - (singerInt - refInt).abs() / 4.0).clamp(0.0, 1.0);
   }
 
-  // --- Without reference (Linux) ---
-  // These modes score DIFFERENTLY from each other. The key insight:
-  // without reference, we score HOW you sing, not WHAT you sing.
+  // =====================================================
 
-  /// Pitch mode: how cleanly are you holding notes?
-  /// Frame-to-frame stddev of MIDI values over the recent window.
-  /// At ~25fps, a steady note has stddev ~0.05-0.2 semitones.
-  /// Moving between notes has stddev ~0.5-2.0.
-  double _voicePitchStability(double singerMidi) {
-    if (_recentPitches.length < 3) return 0.5;
-    final mean = _recentPitches.reduce((a, b) => a + b) / _recentPitches.length;
-    final variance = _recentPitches
-        .map((p) => (p - mean) * (p - mean))
-        .reduce((a, b) => a + b) / _recentPitches.length;
-    final stddev = math.sqrt(variance);
-
-    // Map stddev to score using a smooth curve.
-    // stddev 0.0 = 1.0 (perfect hold)
-    // stddev 0.5 = 0.78
-    // stddev 1.0 = 0.37
-    // stddev 2.0 = 0.02
-    return math.exp(-stddev * stddev / 0.8).clamp(0.0, 1.0);
-  }
-
-  /// Contour mode: are you creating melodic shapes?
-  /// Measures the TOTAL pitch range covered in the recent window,
-  /// not frame-to-frame deltas (which are tiny at 25fps).
-  double _voiceContourMelody(double singerMidi) {
-    _recentPitches; // already updated by the main flow
-    if (_recentPitches.length < 5) return 0.5;
-
-    // Pitch range in the window: how many semitones are you covering?
-    final maxP = _recentPitches.reduce(math.max);
-    final minP = _recentPitches.reduce(math.min);
-    final range = maxP - minP;
-
-    // Also count significant direction changes (> 0.5 semitone moves)
-    int significantMoves = 0;
-    for (var i = 1; i < _recentPitches.length; i++) {
-      if ((_recentPitches[i] - _recentPitches[i - 1]).abs() > 0.5) {
-        significantMoves++;
-      }
-    }
-
-    // Monotone (range < 1 semitone): low
-    // Moderate melody (range 2-6 semitones): high
-    // Wild range (> 10 semitones in 15 frames): probably noise
-    double rangeScore;
-    if (range < 0.5) {
-      rangeScore = 0.1; // flat
-    } else if (range < 1.5) {
-      rangeScore = 0.3 + (range - 0.5) * 0.4; // 0.3-0.7
-    } else if (range <= 7.0) {
-      rangeScore = 0.7 + (range - 1.5) * 0.055; // 0.7-1.0
-    } else {
-      rangeScore = math.max(0.3, 1.0 - (range - 7.0) * 0.1); // drops for wild range
-    }
-
-    // Bonus for significant moves (actual melody, not drift)
-    final moveRatio = significantMoves / (_recentPitches.length - 1);
-    if (moveRatio > 0.1 && moveRatio < 0.5) {
-      rangeScore = (rangeScore + 0.15).clamp(0.0, 1.0);
-    }
-
-    return rangeScore;
-  }
-
-  /// Interval mode: are the jumps between notes musical?
-  /// Measures the actual note-to-note interval (not frame-to-frame micro-changes).
-  /// Only triggers on significant pitch changes (> 0.5 semitone).
-  double _voiceIntervalQuality(double singerMidi) {
-    if (_prevSingerPitch <= 0) return 0.5;
-    final prevMidi = hzToMidi(_prevSingerPitch);
-    final interval = (singerMidi - prevMidi).abs();
-
-    // Ignore micro-movements (< 0.5 semitone) — not real interval changes
-    if (interval < 0.5) {
-      // Holding a note or tiny drift: moderate score
-      return 0.6;
-    }
-
-    // Score musical intervals with a Gaussian centered at 2 semitones.
-    // 1 semitone (half step) = 0.88
-    // 2 semitones (whole step) = 1.0
-    // 3-4 (third) = 0.80-0.88
-    // 5 (fourth) = 0.57
-    // 7 (fifth) = 0.24
-    // 12 (octave) = very low
-    final x = interval - 2.0;
-    return math.exp(-x * x / 6.0).clamp(0.05, 1.0);
+  void _emit(double pitchHz, double primary, String noteName,
+      double stability, double confidence, double frameScore, double rms) {
+    _scoreController.add(ScoringUpdate(
+      singerPitchHz: pitchHz,
+      referencePitchHz: _currentReferencePitchHz,
+      noteName: noteName,
+      primaryScore: primary,
+      stabilityScore: stability,
+      confidence: confidence,
+      frameScore: frameScore,
+      totalScore: currentScore,
+      overallScore: finalScore,
+      rmsEnergy: rms,
+      streakCount: _streakCount,
+    ));
   }
 
   void _pushScore(double score) {
