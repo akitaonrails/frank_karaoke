@@ -4,13 +4,15 @@
 
 1. [How Professional Systems Work](#how-professional-systems-work)
 2. [Our Constraints](#our-constraints)
-3. [Scoring Architecture](#scoring-architecture)
-4. [Voice Isolation from Mixed Mic Input](#voice-isolation-from-mixed-mic-input)
-5. [Latency & Sync Considerations](#latency--sync-considerations)
-6. [Scoring Dimensions](#scoring-dimensions)
-7. [Reference-Based Scoring (Future)](#reference-based-scoring-future)
-8. [Open Source References](#open-source-references)
-9. [Academic Papers](#academic-papers)
+3. [Current Implementation](#current-implementation)
+4. [Voice Isolation](#voice-isolation)
+5. [The 4 Scoring Modes](#the-4-scoring-modes)
+6. [Pitch Oracle](#pitch-oracle)
+7. [Samsung Android Mic Configuration](#samsung-android-mic-configuration)
+8. [Scoring Dimensions (Research)](#scoring-dimensions-research)
+9. [Reference-Based Scoring (Future)](#reference-based-scoring-future)
+10. [Open Source References](#open-source-references)
+11. [Academic Papers](#academic-papers)
 
 ---
 
@@ -36,233 +38,203 @@ Pitch `5` = MIDI 65 (F4). Scoring: quantize singer's pitch to nearest semitone, 
 
 Uses MIDI melody data. Samples singer pitch every ~30ms. Three tolerance bands around each reference note, encodes deviation as 2-bit data. Scores pitch and volume only, not vibrato or rhythm.
 
-### US5719344A (Budget Machines)
+### Key Takeaway
 
-Compares frame energy patterns (not pitch) between singer and original artist using XOR of quantized energy. Detects "is the singer making sound when the reference has sound." Very crude — this is what cheap karaoke machines without MIDI do.
-
-### Gaudio Lab TrueScore
-
-Separates the original artist's vocals from the full mix using source-separation ML (GSEP model), then uses extracted vocals as the reference. Covers pitch, timing, vibrato. Requires GPU — not real-time on mobile.
+All professional systems rely on **pre-made melody reference files**. None attempt real-time melody extraction from the audio. This is the fundamental constraint we work around.
 
 ---
 
 ## Our Constraints
 
-### What We Have
+Frank Karaoke works with **any YouTube video** without pre-made song files. This means:
 
-| Platform | Mic Input | Reference Audio | Notes |
-|---|---|---|---|
-| **Linux desktop** | USB mic or built-in (clean signal) | YouTube video plays through webview, no PCM access | Mic gets clean voice only |
-| **Android + external mic** | Bluetooth or wired mic (clean signal) | `just_audio` plays extracted audio, full PCM access | Best setup — clean voice + clean reference |
-| **Android + built-in mic** | Device mic (picks up EVERYTHING) | `just_audio` plays audio through speaker | Mic captures voice + music + room echo + speaker effects |
-| **Android + JBL PartyBox** | Device mic (picks up room) | Audio plays through JBL via Bluetooth | Mic hears voice + loud speaker output with JBL effects |
+| What We Have | What We Don't Have |
+|---|---|
+| Phone mic (captures voice + speaker bleed) | Per-song melody reference files |
+| Reference audio URL (via `youtube_explode_dart`) | Synchronized PCM of the reference audio |
+| YIN pitch detection (pure Dart) | Source separation (voice vs instruments) |
+| Bandpass filter (200-3500 Hz) | Beat grid / rhythm timing data |
 
-### The Core Challenge
+### The Phone Mic Challenge
 
-On Android with the device's built-in mic, the microphone captures:
-1. The singer's voice
-2. The music coming from the speaker/JBL
-3. Room reverb and echo
-4. Speaker processing effects (bass boost, EQ)
-5. Bluetooth audio delay (100-300ms typical)
+On Android with the built-in mic, the microphone captures:
+1. The singer's voice (what we want)
+2. The music from the speaker (what we don't want)
+3. Room reverb and ambient noise
 
-The extracted reference audio (from `youtube_explode_dart` → `just_audio`) is the **clean instrumental track**. The mic input is the **dirty mix of voice + that same instrumental + room acoustics**.
+The singer is physically closer to the mic than the speaker, so their voice dominates — but not enough for clean separation. The bandpass filter helps by attenuating frequencies where instruments are strongest (bass below 200 Hz, treble above 3500 Hz).
 
 ---
 
-## Scoring Architecture
+## Current Implementation
 
-### Current: Reference-Free Scoring (Nakano et al. 2006)
-
-Works on all platforms without any reference comparison. Scores the singer's vocal quality in absolute terms.
+### Audio Pipeline
 
 ```
-score = chromatic_snap * 0.40
-      + pitch_stability * 0.30
-      + presence        * 0.15
-      + dynamics        * 0.15
+Mic input (voice + speaker bleed)
+  → Bandpass filter (200-3500 Hz IIR, attenuates instrumental frequencies)
+  → YIN pitch detection (threshold 0.70 for mixed signals)
+  → Pitch confidence check (reject < 0.3)
+  → Singing threshold (reject low amplitude)
+  → Scoring mode evaluation
+  → EMA live score (alpha 0.15 for ~1s response)
+  → Overlay display via JS injection
 ```
 
-| Dimension | What It Measures | How |
-|---|---|---|
-| Chromatic snap | How cleanly the singer lands on musical note boundaries | Deviation in cents from nearest semitone. 0 cents = perfect, 50 cents = half-semitone off |
-| Pitch stability | Whether the singer holds notes steadily | Rolling stddev of MIDI note values over ~500ms. Low = stable |
-| Presence | Fraction of time actually singing | Voiced frames / total frames. Instrumental breaks are skipped |
-| Dynamics | Natural volume variation | RMS stddev over ~2s. Rewards moderate variation, penalizes flat screaming or near-silence |
+### Two Score Displays
 
-**Pros**: Works everywhere, no reference needed, correlates r=0.82 with human judgments.
-**Cons**: Can't tell if the singer is singing the RIGHT notes for THIS song. A technically perfect rendition of the wrong melody scores high.
+- **Live score**: Exponential Moving Average of recent frame scores. Reacts to current singing within ~1 second.
+- **Overall score**: Cumulative average of the entire song. Used for the end-of-song celebration.
 
-### Future: Reference-Based Scoring
+### Playback Sync
 
-When we have a reference melody (either from `just_audio` PCM or a pre-generated note file), the scoring becomes:
-
-```
-score = pitch_match     * 0.50   (semitone distance to reference, octave-agnostic)
-      + rhythm_match    * 0.20   (onset timing vs reference onsets)
-      + stability       * 0.15   (same as reference-free)
-      + dynamics        * 0.15   (same as reference-free)
-```
+Video play/pause/seek events are detected via JavaScript event listeners injected into the YouTube page:
+- **Video pause** → scoring pauses (no ambient noise scoring)
+- **Video play** → scoring resumes after 2-second delay
+- **Video seek** → score resets to zero + 5-second warmup
+- **5-second warmup** after every start/restart to skip initial noise
 
 ---
 
-## Voice Isolation from Mixed Mic Input
+## Voice Isolation
 
-When the Android mic picks up voice + music together, we need to isolate the voice before scoring. Since we have the clean reference audio (from `just_audio`), we can use it for subtraction.
+### What We Tried
 
-### Approach 1: Spectral Subtraction (Simple, Real-Time)
+1. **Spectral subtraction** using reference audio — abandoned because:
+   - YouTube CDN blocks `just_audio` from playing extracted URLs (non-browser UA)
+   - Even with the reference, speaker EQ, room reverb, and Bluetooth delay make the reference signal too different from what the mic hears
+   - Simple subtraction leaves worse artifacts than no subtraction
 
-1. Compute FFT of mic input (voice + music)
-2. Compute FFT of reference audio (music only, from `just_audio`)
-3. Subtract reference magnitude spectrum from mic spectrum
-4. The residual is approximately the voice
+2. **Pre-emphasis + center clipping** — abandoned because:
+   - Center clipping destroys the waveform shape that YIN needs for autocorrelation
+   - Pre-emphasis amplifies noise as much as voice
 
-```
-voice_spectrum ≈ |mic_fft| - α * |reference_fft|
-```
+### What We Use
 
-Where α is a gain factor (typically 1.0-2.0) to account for speaker volume.
+**Bandpass filter (200-3500 Hz)**: A cascaded second-order IIR filter (Butterworth, Q=0.707) with:
+- High-pass at 200 Hz: removes bass, kick drum, bass guitar from speaker bleed
+- Low-pass at 3500 Hz: removes cymbals, hi-hats, high-frequency speaker noise
+- Voice fundamentals (85-300 Hz) and formants (300-3000 Hz) pass through
 
-**Challenges**:
-- Requires time-alignment between mic and reference (see Latency section)
-- Speaker EQ/effects change the frequency profile — the subtraction won't be perfect
-- Room reverb smears the reference in time — simple subtraction leaves artifacts
-- Works better in frequency domain than time domain
+This doesn't perfectly isolate the voice, but it significantly improves the voice-to-music ratio for pitch detection.
 
-**Implementation**: Apply spectral subtraction frame-by-frame, then run pitch detection on the cleaned signal. Even imperfect subtraction helps — reducing the music by 10-20 dB dramatically improves pitch detection of the voice.
+### What We Plan (Pitch Oracle)
 
-### Approach 2: Harmonic/Percussive Separation
+Instead of subtracting the reference signal, use it as a **pitch oracle** — it tells us what the music is playing, so we can distinguish singer from speaker bleed:
 
-Separate the mic input into harmonic (tonal) and percussive components using median filtering on the spectrogram. The voice is predominantly harmonic. This doesn't use the reference at all but helps isolate pitched content.
+- Download reference audio via `youtube_explode_dart`'s authenticated stream client
+- Decode to PCM via `audio_decoder` (Android MediaCodec)
+- Build a pitch timeline for the entire song
+- During scoring: if mic pitch matches reference pitch → speaker bleed → ignore
+- If mic pitch differs from reference → singer's voice → score it
 
-### Approach 3: ML-Based Source Separation (Future)
+This approach is robust to reverb, EQ, delay, and ambient noise because it compares pitch values, not waveform shapes.
 
-Use a model like Demucs (Meta) or Open-Unmix to separate voice from accompaniment in real-time. These models can run on mobile with TensorFlow Lite or ONNX Runtime, but require significant engineering:
-- Model size: 20-80 MB
-- Latency: 50-200ms per frame on mobile GPU
-- Quality: state-of-the-art, dramatically better than spectral subtraction
-
-**Recommendation**: Start with spectral subtraction (Approach 1) for v1. It's real-time, requires no ML models, and "good enough" for party karaoke. Upgrade to ML separation later if quality demands it.
-
-### Approach 4: Noise Gate + Frequency Band Filtering
-
-Simpler than spectral subtraction:
-- High-pass filter the mic at 200 Hz (removes bass/drums from speaker bleed)
-- The fundamental frequency of most singing is 100-800 Hz
-- Music has energy spread across the full spectrum; voice energy is concentrated
-- After filtering, the voice-to-music ratio improves significantly
-
-Can be combined with spectral subtraction for better results.
+**Current status**: Implemented but YouTube rate-limits the API calls during heavy testing. Works when rate limit clears.
 
 ---
 
-## Latency & Sync Considerations
+## The 4 Scoring Modes
 
-### Sources of Delay
+All modes share the same audio pipeline (bandpass filter → YIN → confidence gate). The difference is in how they evaluate the detected pitch.
 
-| Source | Typical Delay | Notes |
-|---|---|---|
-| Bluetooth A2DP audio | 100-300ms | Between `just_audio` output and speaker sound |
-| WebView video-to-audio sync | 0-200ms | YouTube's own buffering |
-| `just_audio` ↔ WebView sync | 50-500ms | Our sync mechanism (periodic JS bridge polling) |
-| Speaker processing (JBL DSP) | 10-50ms | Bass boost, EQ, spatial effects |
-| Room acoustics (reverb) | 10-100ms | Sound travel + wall reflections |
-| Mic capture latency | 5-20ms | `record` package → PCM buffer delivery |
-| Total worst case | **175-1170ms** | Bluetooth + bad sync + room + processing |
+### 🎯 Pitch Match
 
-### Impact on Scoring
+**What it measures**: How cleanly you hold notes (pitch stability)
 
-For **pitch comparison** (reference vs voice), the mic input arrives AFTER the reference by the total delay. If we compare frame N of the reference with frame N of the mic, we're comparing different moments in the song.
+**How it works**: Gaussian decay based on the standard deviation of MIDI values over a ~15-frame rolling window. Steady notes (stddev < 0.3 semitones) score 85-100%. Wobbling (stddev > 2 semitones) scores near 0%.
 
-**Solution: Cross-correlation alignment**
+**Best for**: Songs you know well, where you can hold notes steadily.
 
-1. Maintain a circular buffer of the last ~2 seconds of reference audio
-2. Cross-correlate the mic input against this buffer to find the lag
-3. Use the lag-aligned reference frame for comparison
-4. Re-compute alignment every ~5 seconds (drift correction)
+### 〰️ Contour
+
+**What it measures**: How much melodic shape you create
+
+**How it works**: Measures pitch range covered in the recent window plus significant melodic movements (> 0.5 semitone jumps). Monotone singing scores ~10%. Smooth melodic movement with 2-6 semitone range scores 70-100%.
+
+**Best for**: Learning new songs, singing in a comfortable key.
+
+### 📐 Intervals
+
+**What it measures**: Musical quality of note-to-note jumps
+
+**How it works**: Gaussian scoring curve centered at 2 semitones (whole step). Half step = 88%, third = 80%, fifth = 24%, octave jump = very low. Sustained same-note = 60%.
+
+**Best for**: Singing in a different key, rewarding proper phrasing.
+
+### 🔥 Streak
+
+**What it measures**: Consistency under pressure
+
+**How it works**: Uses Pitch Match as the base score, plus a combo multiplier. Consecutive frames above 0.4 primary score build the streak counter. The streak adds bonus points (up to +0.4 at 30+ streak). Breaking a streak > 5 frames pushes a 0.05 penalty into the EMA. Silence freezes the streak (instrumental breaks are safe).
+
+**Best for**: Parties and competition — most dynamic and exciting.
+
+### With vs Without Reference (Pitch Oracle)
+
+When the pitch oracle is available:
+- **Pitch Match**: Compares singer's pitch class against reference pitch class (octave-agnostic, like SingStar)
+- **Contour**: Cross-correlation of singer's pitch movement vs reference pitch movement
+- **Intervals**: Compares singer's semitone jumps against reference jumps
+- **Streak**: Uses reference-based Pitch Match as base
+
+When the oracle is not available (rate limited, download failed):
+- All modes use voice-only analysis as described above
+
+---
+
+## Samsung Android Mic Configuration
+
+### Critical Settings
 
 ```dart
-// Pseudo-code for alignment
-final lag = crossCorrelate(micBuffer, referenceBuffer);
-// lag is in samples, convert to frames
-final alignedReferenceFrame = referenceBuffer[currentFrame - lag];
+RecordConfig(
+  autoGain: false,     // Samsung AGC ATTENUATES the signal
+  echoCancel: false,   // Uses VOICE_COMMUNICATION mode, steals audio focus
+  noiseSuppress: false, // Can filter the voice along with noise
+  audioInterruption: AudioInterruptionMode.none,  // Don't pause when video plays
+)
 ```
 
-For **reference-free scoring** (current implementation), latency doesn't matter — we only analyze the singer's voice in isolation.
+### Why `autoGain: false` is Critical
 
-### Wi-Fi Considerations
+Samsung's `AutomaticGainControl` DSP implementation targets a low RMS reference level (tuned for voice calls). On Samsung Galaxy devices, enabling AGC reduces the mic peak from ~0.06 to ~0.003 — essentially silence for pitch detection.
 
-If the phone is on Wi-Fi and the YouTube video is streaming:
-- Video buffering adds variable latency
-- Network jitter can cause audio glitches in `just_audio`
-- The `youtube_explode_dart` extracted URL may expire (typically valid for 6 hours)
+### Why `AudioInterruptionMode.none`
 
-**Mitigation**: Pre-buffer ~10 seconds of `just_audio` audio before starting scoring. Monitor for buffer underruns and pause scoring during glitches.
+The `record` package's default `pause` mode automatically pauses the recorder when another audio source starts playing (the YouTube video). Setting to `none` keeps the recorder running regardless.
+
+### Software Gain
+
+Even with AGC disabled, Samsung phone mics produce low PCM levels (peak ~0.05-0.15 vs desktop mics at ~0.5-0.8). When peak < 0.01, the app applies software gain (up to 30x) to bring the signal to usable levels for YIN pitch detection.
 
 ---
 
-## Scoring Dimensions (Detailed)
+## Scoring Dimensions (Research)
 
-### 1. Chromatic Snap / Intonation (Weight: 40%)
+Based on Nakano et al. (2006) and Tsai & Lee (2012), the main dimensions of vocal quality that can be measured without reference:
 
-**What**: How close is each sung pitch to the nearest musical note (semitone)?
+### 1. Intonation / Chromatic Snap
 
-**How**: 
-```
-midi = 69 + 12 * log2(hz / 440)
-nearest_note = round(midi)
-deviation_cents = |midi - nearest_note| * 100
-snap_score = max(0, 1 - deviation_cents / 50)
-```
+How close each sung pitch lands to the nearest musical note (semitone). Measured as deviation in cents (100 cents = 1 semitone). Good singers: 10-20 cents. Amateur: 30-50+ cents.
 
-**Why 50 cents threshold**: A quarter-tone (50 cents) is the smallest interval most listeners perceive as "out of tune." Professional singers stay within 10-20 cents; amateur singers drift 30-50+ cents.
+**Note**: YIN's frequency resolution naturally snaps to harmonic frequencies near semitone boundaries, making this metric less discriminative than expected in practice. The current implementation uses pitch stability instead.
 
-**Octave-agnostic**: Following SingStar's approach, we should match pitch class regardless of octave. A man singing C3 while the reference shows C5 is still "on pitch." Implementation: `deviation = (midi % 12) - (reference_midi % 12)`.
+### 2. Pitch Stability
 
-### 2. Pitch Stability (Weight: 30%)
+Standard deviation of MIDI values over a rolling window. Good singing: stddev < 0.5 semitones. Bad singing: stddev > 2 semitones.
 
-**What**: Is the singer holding notes steadily or wobbling erratically?
+### 3. Melodic Movement
 
-**How**: Rolling standard deviation of MIDI values over ~500ms (12 frames at 100fps). Good singing: stddev < 0.5 semitones. Bad singing: stddev > 2 semitones.
+Pitch range and direction changes over time. Monotone singing (flat pitch, no movement) is penalized. Smooth melodic movement with moderate range is rewarded.
 
-**Distinction from vibrato**: Intentional vibrato is periodic (5-7 Hz) with controlled extent (±0.5-1.0 semitones). Instability is aperiodic and wider. A future enhancement could detect vibrato and reward it as a bonus.
+### 4. Interval Quality
 
-### 3. Presence / Engagement (Weight: 15%)
+Musical quality of note-to-note jumps. Steps and thirds are "musical." Wild jumps are not. Gaussian scoring centered at the whole step (2 semitones).
 
-**What**: Is the singer actually singing throughout the song?
+### 5. Pitch Confidence (YIN CMNDF)
 
-**How**: `voiced_frames / total_frames` (excluding silence below noise gate).
-
-**Important**: Instrumental breaks should not penalize. The noise gate threshold handles this — quiet frames are simply not counted in the denominator.
-
-### 4. Volume Dynamics (Weight: 15%)
-
-**What**: Does the singer vary their volume expressively?
-
-**How**: Standard deviation of RMS energy over ~2-second windows. 
-- Too flat (stddev < 0.005): score 0.3 — monotone shouting
-- Too erratic (stddev > 0.2): score 0.4 — unstable
-- Moderate variation (0.01-0.1): score 0.5-1.0 — expressive singing
-
-### 5. Vibrato Detection (Bonus, Not Yet Implemented)
-
-**What**: Periodic pitch modulation on held notes (5-7 Hz, ±0.5-1 semitone).
-
-**How**: Autocorrelation of pitch contour on segments where pitch is sustained. If a clear periodicity is found in the 5-7 Hz range, award a bonus.
-
-**Weight**: Bonus only (add up to +5 points to final score). Never penalize absence of vibrato — many excellent pop/rock singers don't use it.
-
-### 6. Rhythm / Timing (Future, Requires Beat Grid)
-
-**What**: Is the singer starting phrases at the right time?
-
-**How**: 
-1. Extract BPM from the instrumental track (onset detection + autocorrelation)
-2. Detect vocal onsets in the mic input
-3. Compare onset timing against the beat grid
-4. Score based on timing accuracy (±50ms tolerance for "on beat")
-
-**Feasibility**: BPM extraction from audio is well-studied and can be done in real-time with autocorrelation on onset strength signals. However, mapping vocal phrase onsets to specific beats requires either a reference melody or a pre-computed beat map.
+The YIN algorithm's CMNDF minimum value directly measures how periodic (tonal) the signal is. Clear singing: CMNDF 0.01-0.10. Speech/noise: 0.30-0.90. Used as a gate (reject < 0.3) to prevent scoring non-singing sounds.
 
 ---
 
@@ -270,41 +242,20 @@ snap_score = max(0, 1 - deviation_cents / 50)
 
 ### Option A: Pre-Computed Reference via UltraSinger
 
-[UltraSinger](https://github.com/rakuri255/UltraSinger) auto-generates UltraStar `.txt` note files from songs using:
-1. **Demucs** — separate vocals from accompaniment
-2. **basic-pitch** (Spotify) — transcribe vocal melody to MIDI notes
-3. **WhisperX** — align lyrics to timestamps
+[UltraSinger](https://github.com/rakuri255/UltraSinger) auto-generates UltraStar `.txt` note files from songs using Demucs (source separation), basic-pitch (melody transcription), and WhisperX (lyrics alignment).
 
-The output is a standard UltraStar `.txt` file that encodes every note's pitch, start beat, and duration.
+**Integration plan**: Run UltraSinger offline, cache `.txt` files by YouTube video ID, use for reference-based scoring when available.
 
-**Integration plan**:
-1. Run UltraSinger offline for popular karaoke tracks
-2. Cache the `.txt` file by YouTube video ID
-3. At runtime, check if a cached note file exists for the current video
-4. If yes, use reference-based scoring (pitch match against notes)
-5. If no, fall back to reference-free scoring
+### Option B: Pitch Oracle Enhancement
 
-**Trade-offs**: Processing takes 2-20 minutes per song. Could be done server-side or as a background task on desktop. The note file is small (~5-50 KB per song).
+Current pitch oracle downloads the full audio and builds a pitch timeline. Future improvements:
+- Cache decoded pitch timelines by video ID (avoid re-downloading)
+- Cross-correlation for automatic speaker delay estimation
+- Use reference pitch for reference-based scoring modes (already implemented, needs oracle to load successfully)
 
-### Option B: Real-Time Reference from `just_audio` PCM (Android Only)
+### Option C: ML-Based Source Separation
 
-On Android where `just_audio` gives us PCM access to the instrumental:
-1. Run YIN pitch detection on the reference audio
-2. The detected pitch is the dominant melody instrument
-3. Compare against singer's pitch (octave-agnostic)
-
-**Problem**: The instrumental may have multiple pitched instruments (guitar + piano + synth). YIN picks the dominant one, which may not be the melody. Accuracy is unreliable.
-
-**Partial solution**: Use the reference pitch as a "hint" rather than ground truth. If the singer's pitch is within 2 semitones of the reference pitch (any octave), give a bonus. Don't penalize if they don't match — the reference might be wrong.
-
-### Option C: Nightingale Architecture
-
-[Nightingale](https://github.com/rzru/nightingale) pre-processes songs using:
-1. Demucs stem separation → extract vocals
-2. WhisperX → align lyrics and timing
-3. Melody tracker → extract pitch contour
-
-Results are stored and used for real-time scoring. This is the most complete solution but requires significant server infrastructure or powerful desktop processing.
+Use Demucs or Open-Unmix via TensorFlow Lite for real-time voice separation on mobile. Requires significant engineering (model size 20-80 MB, latency 50-200ms per frame).
 
 ---
 
@@ -322,44 +273,16 @@ Results are stored and used for real-time scoring. This is the most complete sol
 
 ## Academic Papers
 
-1. **Nakano et al. (2006)** — "Automatic singing skill evaluation for unknown melodies using pitch interval accuracy and vibrato features." INTERSPEECH 2006. 83.5% accuracy classifying good/poor singers without reference melody. The foundation of our reference-free scoring.
+1. **Nakano et al. (2006)** — "Automatic singing skill evaluation for unknown melodies using pitch interval accuracy and vibrato features." INTERSPEECH 2006. 83.5% accuracy classifying good/poor singers without reference melody.
 
-2. **Tsai & Lee (2012)** — "Automatic Evaluation of Karaoke Singing Based on Pitch, Volume, and Rhythm Features." IEEE TASLP. Correlation r=0.82 with human judgments. Most comprehensive reference-free framework.
+2. **Tsai & Lee (2012)** — "Automatic Evaluation of Karaoke Singing Based on Pitch, Volume, and Rhythm Features." IEEE TASLP. Correlation r=0.82 with human judgments.
 
 3. **Molina et al. (2013)** — "Evaluation framework and case study for automatic singing assessment." NUS. Pitch histogram distribution analysis, Spearman correlation 0.716.
 
-4. **Zhang (2014)** — "A Real-time Karaoke Scoring System Based on Pitch Detection." Rochester ECE. Practical implementation using FFT pitch detection and frame-level scoring.
+4. **Zhang (2014)** — "A Real-time Karaoke Scoring System Based on Pitch Detection." Rochester ECE.
 
-5. **Qiu (2012)** — "Development of Scoring Algorithm for Karaoke Computer Games." DiVA. Survey of karaoke scoring approaches and SingStar-like implementation.
+5. **Qiu (2012)** — "Development of Scoring Algorithm for Karaoke Computer Games." DiVA.
 
 6. **US5889224A (Yamaha, 1999)** — Karaoke scoring patent using MIDI reference with three tolerance bands.
 
-7. **WO2010115298A1** — "Automatic Scoring Method for Karaoke Singing Accompaniment." Chinese patent covering pitch + rhythm + volume scoring.
-
----
-
-## Implementation Roadmap
-
-### Phase 1 (Current) — Reference-Free Scoring
-- Chromatic snap + stability + presence + dynamics
-- Works on all platforms, no reference needed
-- Good for "party mode" — scores vocal quality, not melody accuracy
-
-### Phase 2 — Voice Isolation for Android Built-in Mic
-- Spectral subtraction using `just_audio` reference audio
-- Cross-correlation for time alignment
-- High-pass filtering at 200 Hz
-- Goal: extract clean-enough voice for reliable pitch detection
-
-### Phase 3 — Reference-Based Scoring with UltraSinger
-- Offline pipeline to generate `.txt` note files from YouTube karaoke tracks
-- Cache by video ID (local SQLite or server)
-- Hybrid scoring: reference-based when available, reference-free fallback
-- Octave-agnostic pitch matching (like SingStar)
-
-### Phase 4 — Advanced Features
-- Vibrato detection and bonus scoring
-- Beat grid extraction for rhythm scoring
-- ML-based source separation (Demucs via TFLite)
-- Multiplayer scoring with participant tracking
-- Score history and progression tracking via Drift/SQLite
+7. **WO2010115298A1** — "Automatic Scoring Method for Karaoke Singing Accompaniment."
