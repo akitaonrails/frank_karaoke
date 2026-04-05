@@ -98,8 +98,9 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       ref.read(isVideoPlayingProvider.notifier).state = true;
     }
 
-    // Mute the webview's video element so audio comes from just_audio
-    if (_created) {
+    // On Android, mute the webview so audio comes from just_audio.
+    // On Linux, the webview handles audio directly.
+    if (_created && syncService.shouldMuteWebview) {
       await _controller.evaluateJavascript(
         source: YouTubeSyncService.muteVideoJs,
       );
