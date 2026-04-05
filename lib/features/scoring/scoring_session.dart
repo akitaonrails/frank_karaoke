@@ -8,46 +8,76 @@ import '../audio/mic_capture_service.dart';
 import '../audio/pitch_detector.dart';
 import 'scoring_engine.dart';
 
-/// Orchestrates real-time scoring during an active karaoke session.
+/// Reference-free karaoke scoring.
 ///
-/// Scoring approach (without separate reference audio on Linux):
-/// - Detects whether the singer is producing stable, pitched vocal sounds
-/// - Rewards pitch stability (holding notes) over erratic jumping
-/// - Ignores silent/quiet frames (instrumental breaks don't penalize)
-/// - Gives partial credit for any pitched singing in the vocal range
+/// Based on Nakano et al. (2006) and Tsai & Lee (2012):
+/// scores singing quality without a reference melody by measuring
+/// chromatic intonation, pitch stability, presence, and dynamics.
+///
+/// Scoring dimensions:
+/// - **Chromatic snap** (40%): how cleanly the singer lands on musical
+///   notes (semitone boundaries). Good singers snap; bad singers drift.
+/// - **Pitch stability** (30%): low pitch variance over ~500ms windows
+///   means the singer is holding notes steadily.
+/// - **Presence** (15%): fraction of time actually singing vs silent.
+/// - **Dynamics** (15%): natural volume variation (not flat screaming).
+///
+/// Octave-agnostic: singing in any octave scores equally (like SingStar).
 class ScoringSession {
   final MicCaptureService _mic;
   final PitchDetector _pitchDetector;
   final double _noiseGateThreshold;
-  final double _tolerance;
 
   StreamSubscription<Float64List>? _micSub;
   final _scoreController = StreamController<ScoringUpdate>.broadcast();
   bool _isActive = false;
 
-  // Scoring state
-  int _scoredFrames = 0;
-  double _scoreSum = 0;
-  double _lastPitchHz = 0;
-  int _stableCount = 0; // consecutive frames with stable pitch
+  // Frame counters
+  int _totalFrames = 0;
+  int _voicedFrames = 0;
+
+  // Chromatic snap accumulator
+  double _snapScoreSum = 0;
+
+  // Pitch stability: rolling window of recent pitch values (in semitones)
+  final List<double> _recentPitches = [];
+  static const _stabilityWindowSize = 12; // ~500ms at 100fps mic rate
+  double _stabilityScoreSum = 0;
+
+  // Dynamics: rolling RMS values to measure variance
+  final List<double> _recentRms = [];
+  static const _dynamicsWindowSize = 50; // ~2 seconds
+  double _dynamicsScoreSum = 0;
 
   ScoringSession({
     required MicCaptureService mic,
     required AudioPreset preset,
   })  : _mic = mic,
         _pitchDetector = PitchDetector(),
-        _noiseGateThreshold = preset.noiseGateThreshold,
-        _tolerance = preset.pitchTolerance;
+        _noiseGateThreshold = preset.noiseGateThreshold;
 
   Stream<ScoringUpdate> get scoreStream => _scoreController.stream;
   bool get isActive => _isActive;
 
   int get currentScore {
-    if (_scoredFrames == 0) return 0;
-    return ((_scoreSum / _scoredFrames) * 100).round().clamp(0, 100);
+    if (_totalFrames == 0) return 0;
+    final voiced = _voicedFrames > 0 ? _voicedFrames : 1;
+
+    // Weighted combination
+    final snapAvg = _snapScoreSum / voiced;
+    final stabilityAvg = _stabilityScoreSum / voiced;
+    final presence = _voicedFrames / _totalFrames;
+    final dynamicsAvg = _voicedFrames > 0 ? _dynamicsScoreSum / voiced : 0.0;
+
+    final raw = snapAvg * 0.40
+        + stabilityAvg * 0.30
+        + presence * 0.15
+        + dynamicsAvg * 0.15;
+
+    return (raw * 100).round().clamp(0, 100);
   }
 
-  int get frameCount => _scoredFrames;
+  int get frameCount => _totalFrames;
 
   Future<bool> start() async {
     if (_isActive) return true;
@@ -58,10 +88,13 @@ class ScoringSession {
       return false;
     }
 
-    _scoredFrames = 0;
-    _scoreSum = 0;
-    _lastPitchHz = 0;
-    _stableCount = 0;
+    _totalFrames = 0;
+    _voicedFrames = 0;
+    _snapScoreSum = 0;
+    _stabilityScoreSum = 0;
+    _dynamicsScoreSum = 0;
+    _recentPitches.clear();
+    _recentRms.clear();
     _isActive = true;
 
     _micSub = _mic.pcmStream.listen(_onMicFrame);
@@ -69,26 +102,31 @@ class ScoringSession {
     return true;
   }
 
-  int _processedFrames = 0;
-
   void _onMicFrame(Float64List samples) {
     if (!_isActive) return;
 
     final rms = PitchDetector.rmsEnergy(samples);
+    _totalFrames++;
 
-    _processedFrames++;
-    if (_processedFrames <= 3 || _processedFrames % 200 == 0) {
-      debugPrint('Scoring: frame #$_processedFrames, '
+    // Track RMS for dynamics scoring
+    _recentRms.add(rms);
+    if (_recentRms.length > _dynamicsWindowSize) _recentRms.removeAt(0);
+
+    if (_totalFrames <= 3 || _totalFrames % 200 == 0) {
+      debugPrint('Scoring: frame #$_totalFrames, '
           'rms=${rms.toStringAsFixed(4)}, '
           'score=$currentScore, '
-          'scored=$_scoredFrames');
+          'voiced=$_voicedFrames/$_totalFrames');
     }
 
-    // Noise gate: skip quiet frames entirely (no penalty for silence).
+    // Noise gate: quiet frames count toward presence denominator
+    // but don't contribute to pitch-based scores.
     if (rms < _noiseGateThreshold) {
-      // Still emit an update so the UI shows the quiet state.
       _scoreController.add(ScoringUpdate(
         singerPitchHz: 0,
+        noteName: '--',
+        chromaticSnapScore: 0,
+        stabilityScore: 0,
         frameScore: 0,
         totalScore: currentScore,
         rmsEnergy: rms,
@@ -96,58 +134,91 @@ class ScoringSession {
       return;
     }
 
-    final singerPitch = _pitchDetector.detectPitch(samples);
+    final pitchHz = _pitchDetector.detectPitch(samples);
+    if (pitchHz < 60) {
+      // Unpitched sound (noise, breath) — skip pitch scoring.
+      _scoreController.add(ScoringUpdate(
+        singerPitchHz: 0,
+        noteName: '--',
+        chromaticSnapScore: 0,
+        stabilityScore: 0,
+        frameScore: 0,
+        totalScore: currentScore,
+        rmsEnergy: rms,
+      ));
+      return;
+    }
 
-    // Score this frame based on vocal quality, not reference comparison.
-    final frameScore = _scoreVocalFrame(singerPitch, rms);
+    _voicedFrames++;
 
-    _scoredFrames++;
-    _scoreSum += frameScore;
+    // --- Chromatic snap score ---
+    // How close is the detected pitch to the nearest semitone?
+    // Perfect = 0 cents deviation, worst = 50 cents (quarter-tone).
+    final midi = hzToMidi(pitchHz);
+    final nearestNote = midi.roundToDouble();
+    final deviationCents = (midi - nearestNote).abs() * 100; // in cents
+    final snapScore = (1.0 - (deviationCents / 50.0)).clamp(0.0, 1.0);
+    _snapScoreSum += snapScore;
+
+    // --- Pitch stability score ---
+    _recentPitches.add(midi);
+    if (_recentPitches.length > _stabilityWindowSize) _recentPitches.removeAt(0);
+    double stabilityScore = 0.5; // default if not enough data
+    if (_recentPitches.length >= 3) {
+      // Standard deviation of pitch over the window.
+      // Low stddev = stable note holding. Target < 0.5 semitones.
+      final mean = _recentPitches.reduce((a, b) => a + b) / _recentPitches.length;
+      final variance = _recentPitches
+          .map((p) => (p - mean) * (p - mean))
+          .reduce((a, b) => a + b) / _recentPitches.length;
+      final stddev = math.sqrt(variance);
+      // Map: stddev 0 = score 1.0, stddev 2+ = score 0.0
+      stabilityScore = (1.0 - (stddev / 2.0)).clamp(0.0, 1.0);
+    }
+    _stabilityScoreSum += stabilityScore;
+
+    // --- Dynamics score ---
+    double dynamicsScore = 0.5;
+    if (_recentRms.length >= 10) {
+      final rmsValues = _recentRms;
+      final meanRms = rmsValues.reduce((a, b) => a + b) / rmsValues.length;
+      final rmsVariance = rmsValues
+          .map((r) => (r - meanRms) * (r - meanRms))
+          .reduce((a, b) => a + b) / rmsValues.length;
+      final rmsStddev = math.sqrt(rmsVariance);
+      // Reward moderate variation (0.01-0.1 stddev is good).
+      // Flat (< 0.005) or extreme (> 0.2) scores lower.
+      if (rmsStddev < 0.005) {
+        dynamicsScore = 0.3; // too flat
+      } else if (rmsStddev > 0.2) {
+        dynamicsScore = 0.4; // too erratic
+      } else {
+        dynamicsScore = (0.5 + rmsStddev * 5).clamp(0.5, 1.0);
+      }
+    }
+    _dynamicsScoreSum += dynamicsScore;
+
+    // Frame composite
+    final frameScore = snapScore * 0.40
+        + stabilityScore * 0.30
+        + 1.0 * 0.15 // presence = 1.0 for voiced frames
+        + dynamicsScore * 0.15;
+
+    // Note name for display
+    final noteIndex = nearestNote.round() % 12;
+    final octave = (nearestNote.round() ~/ 12) - 1;
+    const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+    final noteName = '${names[noteIndex]}$octave';
 
     _scoreController.add(ScoringUpdate(
-      singerPitchHz: singerPitch,
+      singerPitchHz: pitchHz,
+      noteName: noteName,
+      chromaticSnapScore: snapScore,
+      stabilityScore: stabilityScore,
       frameScore: frameScore,
       totalScore: currentScore,
       rmsEnergy: rms,
     ));
-  }
-
-  /// Score a single frame based on vocal characteristics.
-  ///
-  /// Rewards:
-  /// - Detected pitch in vocal range (100-800 Hz): base score
-  /// - Pitch stability (holding a note): bonus
-  /// - Moderate volume (not just screaming): bonus
-  ///
-  /// Does NOT penalize:
-  /// - Silence/quiet frames (already filtered by noise gate)
-  double _scoreVocalFrame(double pitchHz, double rms) {
-    // No pitch detected — noise or unpitched sound.
-    if (pitchHz < 60) return 0.1; // Small credit for trying
-
-    // Base score: pitch is in vocal range (80-1000 Hz).
-    double score = 0.5;
-
-    // Bonus for being in the sweet spot (150-600 Hz, typical singing range).
-    if (pitchHz >= 150 && pitchHz <= 600) {
-      score += 0.15;
-    }
-
-    // Stability bonus: if pitch is close to the previous frame's pitch,
-    // the singer is holding a note (good). Erratic jumping = less stable.
-    if (_lastPitchHz > 0) {
-      final semitoneDistance = hzToSemitoneDistance(pitchHz, _lastPitchHz);
-      if (semitoneDistance < _tolerance) {
-        _stableCount = math.min(_stableCount + 1, 20);
-        // Up to 0.35 bonus for sustained stable pitch.
-        score += 0.35 * (_stableCount / 20.0);
-      } else {
-        _stableCount = 0;
-      }
-    }
-
-    _lastPitchHz = pitchHz;
-    return score.clamp(0.0, 1.0);
   }
 
   Future<void> stop() async {
@@ -166,12 +237,18 @@ class ScoringSession {
 
 class ScoringUpdate {
   final double singerPitchHz;
+  final String noteName;
+  final double chromaticSnapScore;
+  final double stabilityScore;
   final double frameScore;
   final int totalScore;
   final double rmsEnergy;
 
   const ScoringUpdate({
     required this.singerPitchHz,
+    required this.noteName,
+    required this.chromaticSnapScore,
+    required this.stabilityScore,
     required this.frameScore,
     required this.totalScore,
     required this.rmsEnergy,

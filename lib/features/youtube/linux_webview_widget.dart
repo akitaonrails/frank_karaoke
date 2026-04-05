@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -227,10 +226,9 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
     );
 
     // Update note label and mic dot.
-    final noteName = _hzToNoteName(update.singerPitchHz);
     final normalizedRms = (update.rmsEnergy * 100).clamp(0.0, 1.0);
     _controller.evaluateJavascript(
-      source: WebviewOverlay.updateNoteAndRmsJs(noteName, normalizedRms),
+      source: WebviewOverlay.updateNoteAndRmsJs(update.noteName, normalizedRms),
     );
   }
 
@@ -276,19 +274,6 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       );
       _overlayInjected = false;
     }
-  }
-
-  static const _noteNames = [
-    'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'
-  ];
-
-  String _hzToNoteName(double hz) {
-    if (hz < 60) return '--';
-    // MIDI note: 69 = A4 = 440 Hz
-    final midi = 69 + 12 * (math.log(hz / 440) / math.ln2);
-    final noteIndex = midi.round() % 12;
-    final octave = (midi.round() ~/ 12) - 1;
-    return '${_noteNames[noteIndex]}$octave';
   }
 
   void _reinjectOverlay() {
