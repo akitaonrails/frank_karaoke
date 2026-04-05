@@ -196,7 +196,7 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
     _celebrationShown = true;
     _videoEndTimer?.cancel();
 
-    final score = _scoringSession?.currentScore ?? _lastInjectedScore;
+    final score = _scoringSession?.finalScore ?? _lastInjectedScore;
     _controller.evaluateJavascript(
       source: WebviewOverlay.celebrationJs(score),
     );
