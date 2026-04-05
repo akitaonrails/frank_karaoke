@@ -1,8 +1,12 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/constants.dart';
+import '../../features/youtube/linux_webview_widget.dart';
 import '../../features/youtube/youtube_webview.dart';
 import '../../state/providers.dart';
 
@@ -15,15 +19,10 @@ class HomeScreen extends ConsumerWidget {
     final videoId = ref.watch(currentVideoIdProvider);
     final score = ref.watch(currentScoreProvider);
 
-    final isWebViewSupported = WebViewPlatform.instance != null;
-
     return Scaffold(
       body: Stack(
         children: [
-          if (isWebViewSupported)
-            const YouTubeWebView()
-          else
-            const _WebViewUnsupported(),
+          _buildWebView(),
 
           // Overlay toggle button (always visible)
           Positioned(
@@ -57,6 +56,17 @@ class HomeScreen extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  Widget _buildWebView() {
+    if (kIsWeb) return const _WebViewUnsupported();
+    if (Platform.isLinux) {
+      return const LinuxWebViewWidget(initialUrl: kYouTubeDesktopUrl);
+    }
+    if (Platform.isAndroid && WebViewPlatform.instance != null) {
+      return const YouTubeWebView();
+    }
+    return const _WebViewUnsupported();
   }
 }
 
