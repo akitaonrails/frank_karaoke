@@ -255,11 +255,13 @@ class ScoringSession {
       _baselineRms = sorted[sorted.length ~/ 4]; // 25th percentile
     }
 
-    // Voice detection: current RMS must be at least 1.3x the baseline.
-    // This is intentionally gentle — we'd rather score some speaker bleed
-    // than miss real singing. The oracle handles pitch-level bleed filtering.
+    // Voice detection: current RMS must be above the baseline.
+    // Uses 1.5x ratio — a tradeoff between catching quiet singing
+    // and rejecting loud guitar solos from the speaker.
+    // The pitch oracle (when loaded) provides the second layer of
+    // filtering by comparing pitch against the reference audio.
     final isVoice = _baselineRms > 0.001
-        ? rawPeak > _baselineRms * 1.3
+        ? rawPeak > _baselineRms * 1.5
         : rawPeak > _singingThreshold;
 
     if (shouldLog) {
