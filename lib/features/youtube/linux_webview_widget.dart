@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -30,6 +31,8 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
   StreamSubscription<ScoringUpdate>? _scoreSub;
   int _lastInjectedScore = -1;
   bool _overlayInjected = false;
+  Timer? _videoEndTimer;
+  bool _celebrationShown = false;
 
   @override
   void initState() {
@@ -140,12 +143,53 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
     }
 
     _scoreSub = _scoringSession?.scoreStream.listen(_onScoreUpdate);
+
+    // Start polling for video end.
+    _celebrationShown = false;
+    _videoEndTimer?.cancel();
+    _videoEndTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      _checkVideoEnd();
+    });
+  }
+
+  Future<void> _checkVideoEnd() async {
+    if (!_created || _celebrationShown) return;
+    try {
+      final result = await _controller.evaluateJavascript(
+        source: '''
+          (function() {
+            var v = document.querySelector('video');
+            if (!v || !v.duration || v.duration === Infinity) return '-1';
+            return v.currentTime + '|' + v.duration;
+          })();
+        ''',
+      );
+      if (result is String && result.contains('|')) {
+        final parts = result.split('|');
+        final current = double.tryParse(parts[0]) ?? 0;
+        final duration = double.tryParse(parts[1]) ?? 0;
+        if (duration > 30 && current > 10 && (duration - current) < 5) {
+          _showCelebration();
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _showCelebration() {
+    if (_celebrationShown || !_created) return;
+    _celebrationShown = true;
+    _videoEndTimer?.cancel();
+
+    final score = _scoringSession?.currentScore ?? _lastInjectedScore;
+    _controller.evaluateJavascript(
+      source: WebviewOverlay.celebrationJs(score),
+    );
   }
 
   void _onScoreUpdate(ScoringUpdate update) {
     if (!_created || !_overlayInjected) return;
 
-    // Update score number.
+    // Update score number with feedback text.
     if (update.totalScore != _lastInjectedScore) {
       _lastInjectedScore = update.totalScore;
       _controller.evaluateJavascript(
@@ -154,7 +198,7 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       ref.read(currentScoreProvider.notifier).state = update.totalScore;
     }
 
-    // Update pitch trail visualization.
+    // Update dual-track pitch trail (voice vs reference from Web Audio).
     final normalizedPitch = update.singerPitchHz > 0
         ? ((update.singerPitchHz - 80) / 720).clamp(0.0, 1.0)
         : 0.0;
@@ -165,15 +209,17 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       ),
     );
 
-    // Update mic activity dot. Scale RMS aggressively — desktop mics
-    // produce very low values (0.001-0.01 typical).
+    // Update note label and mic dot.
+    final noteName = _hzToNoteName(update.singerPitchHz);
     final normalizedRms = (update.rmsEnergy * 100).clamp(0.0, 1.0);
     _controller.evaluateJavascript(
-      source: WebviewOverlay.updateRmsJs(normalizedRms),
+      source: WebviewOverlay.updateNoteAndRmsJs(noteName, normalizedRms),
     );
   }
 
   Future<void> _stopScoring() async {
+    _videoEndTimer?.cancel();
+    _videoEndTimer = null;
     await _scoreSub?.cancel();
     _scoreSub = null;
 
@@ -188,6 +234,19 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       );
       _overlayInjected = false;
     }
+  }
+
+  static const _noteNames = [
+    'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'
+  ];
+
+  String _hzToNoteName(double hz) {
+    if (hz < 60) return '--';
+    // MIDI note: 69 = A4 = 440 Hz
+    final midi = 69 + 12 * (math.log(hz / 440) / math.ln2);
+    final noteIndex = midi.round() % 12;
+    final octave = (midi.round() ~/ 12) - 1;
+    return '${_noteNames[noteIndex]}$octave';
   }
 
   void _reinjectOverlay() {
