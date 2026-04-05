@@ -1,40 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frank_karaoke/ui/screens/session_screen.dart';
-import 'package:frank_karaoke/ui/screens/history_screen.dart';
 import 'package:frank_karaoke/ui/screens/settings_screen.dart';
 import 'package:frank_karaoke/ui/widgets/big_button.dart';
 
 void main() {
-  group('SessionScreen', () {
-    testWidgets('renders singer setup', (tester) async {
-      await tester.pumpWidget(
-        const ProviderScope(
-          child: MaterialApp(home: SessionScreen()),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.text("Tonight's Singers"), findsOneWidget);
-      expect(find.text('Add Singer'), findsOneWidget);
-      expect(find.text('Start Session'), findsOneWidget);
-    });
-  });
-
-  group('HistoryScreen', () {
-    testWidgets('renders empty state', (tester) async {
-      await tester.pumpWidget(
-        const ProviderScope(
-          child: MaterialApp(home: HistoryScreen()),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.textContaining('No sessions yet'), findsOneWidget);
-    });
-  });
-
   group('SettingsScreen', () {
     testWidgets('renders audio presets', (tester) async {
       await tester.pumpWidget(
@@ -63,7 +33,6 @@ void main() {
       await tester.tap(find.text('Party Mode'));
       await tester.pumpAndSettle();
 
-      // Party Mode tile should now show check icon
       expect(find.byIcon(Icons.check_circle), findsOneWidget);
     });
   });

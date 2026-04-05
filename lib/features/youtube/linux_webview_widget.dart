@@ -4,15 +4,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../state/providers.dart';
+import '../overlay/webview_overlay.dart';
+import '../scoring/scoring_session.dart';
 import 'linux_webview_controller.dart';
 import 'youtube_sync_service.dart';
 import 'youtube_url_parser.dart';
 
-/// Linux WebView widget backed by native WebKitGTK.
-///
-/// The native webview is overlaid on the GTK window via GtkOverlay.
-/// When a video is detected, it triggers audio extraction and playback
-/// via the sync service, and mutes the webview's own audio.
 class LinuxWebViewWidget extends ConsumerStatefulWidget {
   const LinuxWebViewWidget({super.key, required this.initialUrl});
 
@@ -29,6 +26,11 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
   StreamSubscription<dynamic>? _eventSub;
   bool _created = false;
 
+  ScoringSession? _scoringSession;
+  StreamSubscription<ScoringUpdate>? _scoreSub;
+  int _lastInjectedScore = -1;
+  bool _overlayInjected = false;
+
   @override
   void initState() {
     super.initState();
@@ -40,7 +42,7 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
   Future<void> _createWebView() async {
     await _controller.create(url: widget.initialUrl);
     _created = true;
-    await _controller.setFrame(bottom: 80);
+    // Full screen — no bottom inset needed anymore.
   }
 
   void _onEvent(dynamic event) {
@@ -52,6 +54,7 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       case 'onLoadStop':
         final url = data is Map ? data['url'] as String? : null;
         if (url != null) _onUrlChange(url);
+        if (_overlayInjected) _reinjectOverlay();
       case 'onUpdateVisitedHistory':
         final url = data is Map ? data['url'] as String? : null;
         if (url != null) _onUrlChange(url);
@@ -72,9 +75,9 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       ref.read(currentVideoIdProvider.notifier).state = videoId;
       _onVideoDetected(videoId);
     } else if (videoId == null && currentId != null) {
-      // Navigated away from a video
       ref.read(currentVideoIdProvider.notifier).state = null;
       ref.read(isVideoPlayingProvider.notifier).state = false;
+      _stopScoring();
     }
   }
 
@@ -83,14 +86,12 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
 
     ref.read(isAudioSyncingProvider.notifier).state = true;
 
-    // Fetch video title
     final audioService = ref.read(youtubeAudioServiceProvider);
     final title = await audioService.getVideoTitle(videoId);
     if (mounted) {
       ref.read(currentVideoTitleProvider.notifier).state = title;
     }
 
-    // Start audio extraction and playback
     await syncService.onVideoDetected(videoId);
 
     if (mounted) {
@@ -98,17 +99,91 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       ref.read(isVideoPlayingProvider.notifier).state = true;
     }
 
-    // On Android, mute the webview so audio comes from just_audio.
-    // On Linux, the webview handles audio directly.
     if (_created && syncService.shouldMuteWebview) {
       await _controller.evaluateJavascript(
         source: YouTubeSyncService.muteVideoJs,
       );
     }
+
+    // Automatically start scoring when a video plays.
+    _startScoring();
+  }
+
+  Future<void> _startScoring() async {
+    await _stopScoring();
+
+    final mic = ref.read(micCaptureServiceProvider);
+    final preset = ref.read(audioPresetProvider);
+
+    _scoringSession = ScoringSession(mic: mic, preset: preset);
+    final started = await _scoringSession!.start();
+
+    if (!started) {
+      debugPrint('Scoring: mic unavailable, overlay only');
+      _scoringSession = null;
+    }
+
+    // Inject overlay regardless of mic (shows song info even without scoring).
+    if (_created) {
+      final title = ref.read(currentVideoTitleProvider) ?? '';
+      await _controller.evaluateJavascript(
+        source: WebviewOverlay.injectOverlayJs(singerName: title),
+      );
+      _overlayInjected = true;
+      _lastInjectedScore = -1;
+    }
+
+    _scoreSub = _scoringSession?.scoreStream.listen(_onScoreUpdate);
+  }
+
+  void _onScoreUpdate(ScoringUpdate update) {
+    if (!_created || !_overlayInjected) return;
+
+    if (update.totalScore != _lastInjectedScore) {
+      _lastInjectedScore = update.totalScore;
+      _controller.evaluateJavascript(
+        source: WebviewOverlay.updateScoreJs(update.totalScore),
+      );
+      ref.read(currentScoreProvider.notifier).state = update.totalScore;
+    }
+
+    if (update.singerPitchHz > 0) {
+      final normalized =
+          ((update.singerPitchHz - 80) / 720).clamp(0.0, 1.0);
+      _controller.evaluateJavascript(
+        source: WebviewOverlay.updatePitchJs(normalized),
+      );
+    }
+  }
+
+  Future<void> _stopScoring() async {
+    await _scoreSub?.cancel();
+    _scoreSub = null;
+
+    if (_scoringSession != null) {
+      await _scoringSession!.stop();
+      _scoringSession = null;
+    }
+
+    if (_created && _overlayInjected) {
+      await _controller.evaluateJavascript(
+        source: WebviewOverlay.removeOverlayJs,
+      );
+      _overlayInjected = false;
+    }
+  }
+
+  void _reinjectOverlay() {
+    if (!_overlayInjected || !_created) return;
+    final title = ref.read(currentVideoTitleProvider) ?? '';
+    _controller.evaluateJavascript(
+      source: WebviewOverlay.injectOverlayJs(singerName: title),
+    );
   }
 
   @override
   void dispose() {
+    _stopScoring();
     _eventSub?.cancel();
     if (_created) {
       _controller.destroy();
@@ -118,10 +193,6 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
 
   @override
   Widget build(BuildContext context) {
-    final currentTab = ref.watch(currentTabProvider);
-    if (_created) {
-      _controller.setVisible(currentTab == 0);
-    }
     return const SizedBox.expand();
   }
 }
