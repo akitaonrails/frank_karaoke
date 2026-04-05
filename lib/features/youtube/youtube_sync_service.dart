@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
 
@@ -18,9 +17,10 @@ class YouTubeSyncService {
   String? _currentVideoId;
   bool _isSyncing = false;
 
-  /// Whether to use the separate audio player (Android) or let the
-  /// webview handle audio (Linux desktop).
-  bool get _useSeparateAudio => !kIsWeb && Platform.isAndroid;
+  /// Separate audio player disabled for now — youtube_explode URLs
+  /// get rejected by just_audio on Android (CDN blocks non-browser UA).
+  /// TODO: fix user agent or use a different approach for reference PCM.
+  bool get _useSeparateAudio => false;
 
   YouTubeSyncService({
     YouTubeAudioService? audioExtractor,
