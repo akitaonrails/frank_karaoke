@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/audio_preset.dart';
 import '../../core/constants.dart';
+import '../../core/scoring_mode.dart';
 import '../../state/providers.dart';
 import '../audio/reference_audio_analyzer.dart';
 import '../overlay/webview_overlay.dart';
@@ -44,24 +45,31 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
     super.initState();
     _controller = LinuxWebViewController();
     _eventSub = _eventChannel.receiveBroadcastStream().listen(_onEvent);
-    _loadSavedPreset();
+    _loadSavedSettings();
     WidgetsBinding.instance.addPostFrameCallback((_) => _createWebView());
   }
 
-  Future<void> _loadSavedPreset() async {
+  Future<void> _loadSavedSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString('audio_preset');
-    if (saved != null) {
-      final preset = AudioPreset.values.where((p) => p.name == saved).firstOrNull;
+    final savedPreset = prefs.getString('audio_preset');
+    if (savedPreset != null) {
+      final preset = AudioPreset.values.where((p) => p.name == savedPreset).firstOrNull;
       if (preset != null) {
         ref.read(audioPresetProvider.notifier).state = preset;
       }
     }
+    final savedMode = prefs.getString('scoring_mode');
+    if (savedMode != null) {
+      final mode = ScoringMode.values.where((m) => m.name == savedMode).firstOrNull;
+      if (mode != null) {
+        ref.read(scoringModeProvider.notifier).state = mode;
+      }
+    }
   }
 
-  Future<void> _savePreset(AudioPreset preset) async {
+  Future<void> _saveSetting(String key, String value) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('audio_preset', preset.name);
+    await prefs.setString(key, value);
   }
 
   Future<void> _createWebView() async {
@@ -77,6 +85,10 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       callback: (args) => _onPitchChange(args.isNotEmpty ? args[0] : ''),
     );
     _controller.addJavaScriptHandler(
+      handlerName: 'FrankMode',
+      callback: (args) => _onModeChange(args.isNotEmpty ? args[0] : ''),
+    );
+    _controller.addJavaScriptHandler(
       handlerName: 'FrankRestart',
       callback: (_) => _restartScoring(),
     );
@@ -86,12 +98,28 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
     final preset = AudioPreset.values.where((p) => p.name == presetId).firstOrNull;
     if (preset == null) return;
     ref.read(audioPresetProvider.notifier).state = preset;
-    _savePreset(preset);
+    _saveSetting('audio_preset', preset.name);
     if (_created && _overlayInjected) {
       _controller.evaluateJavascript(
         source: WebviewOverlay.updatePresetJs(preset.name),
       );
     }
+    if (_scoringSession != null) {
+      _restartScoring();
+    }
+  }
+
+  void _onModeChange(dynamic modeId) {
+    final mode = ScoringMode.values.where((m) => m.name == modeId).firstOrNull;
+    if (mode == null) return;
+    ref.read(scoringModeProvider.notifier).state = mode;
+    _saveSetting('scoring_mode', mode.name);
+    if (_created && _overlayInjected) {
+      _controller.evaluateJavascript(
+        source: WebviewOverlay.updateModeJs(mode.name),
+      );
+    }
+    // Changing scoring mode restarts the song.
     if (_scoringSession != null) {
       _restartScoring();
     }
@@ -205,7 +233,8 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
     final mic = ref.read(micCaptureServiceProvider);
     final preset = ref.read(audioPresetProvider);
 
-    _scoringSession = ScoringSession(mic: mic, preset: preset);
+    final mode = ref.read(scoringModeProvider);
+    _scoringSession = ScoringSession(mic: mic, preset: preset, mode: mode);
 
     // Start reference audio analyzer if we have a URL.
     if (refAudioUrl != null) {
@@ -235,6 +264,7 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
           source: WebviewOverlay.injectOverlayJs(
             singerName: title,
             activePreset: preset.name,
+            activeScoringMode: mode.name,
             pitchShift: pitchShift,
           ),
         );
@@ -379,11 +409,13 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
     if (!_overlayInjected || !_created) return;
     final title = ref.read(currentVideoTitleProvider) ?? '';
     final preset = ref.read(audioPresetProvider);
+    final mode = ref.read(scoringModeProvider);
     final pitchShift = ref.read(pitchShiftProvider);
     _controller.evaluateJavascript(
       source: WebviewOverlay.injectOverlayJs(
         singerName: title,
         activePreset: preset.name,
+        activeScoringMode: mode.name,
         pitchShift: pitchShift,
       ),
     );

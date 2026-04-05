@@ -5,6 +5,7 @@ class WebviewOverlay {
   static String injectOverlayJs({
     required String singerName,
     required String activePreset,
+    required String activeScoringMode,
     required int pitchShift,
   }) => '''
     (function() {
@@ -247,6 +248,57 @@ class WebviewOverlay {
       pitchRow.appendChild(mkPitchBtn('+', 'up'));
       panel.appendChild(pitchRow);
 
+      // Scoring mode section
+      var modeLabel = document.createElement('div');
+      modeLabel.style.cssText = 'font-size:10px;color:rgba(255,255,255,0.4);'
+        + 'letter-spacing:2px;margin-bottom:8px;';
+      modeLabel.textContent = 'SCORING MODE';
+      panel.appendChild(modeLabel);
+
+      var modeRow = document.createElement('div');
+      modeRow.id = 'fk-mode-row';
+      modeRow.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:16px;';
+
+      var modes = [
+        {id:'pitchClass', label:'\\u{1F3AF} Pitch', desc:'Match the song notes (any octave)'},
+        {id:'contour', label:'\\u{3030} Contour', desc:'Follow melody shape (up/down)'},
+        {id:'interval', label:'\\u{1F4D0} Interval', desc:'Match note jumps (key-free)'},
+        {id:'streak', label:'\\u{1F525} Streak', desc:'Combo multiplier for hits'}
+      ];
+      for (var i = 0; i < modes.length; i++) {
+        var m = modes[i];
+        var btn = document.createElement('div');
+        btn.id = 'fk-mode-' + m.id;
+        var isActive = m.id === '$activeScoringMode';
+        btn.style.cssText = 'padding:6px 6px;border-radius:8px;'
+          + 'cursor:pointer;transition:all 0.2s;user-select:none;-webkit-user-select:none;'
+          + (isActive
+            ? 'background:rgba(0,210,255,0.3);border:1px solid rgba(0,210,255,0.6);'
+            : 'background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);');
+        var btnLabel = document.createElement('div');
+        btnLabel.style.cssText = 'font-size:11px;font-weight:600;'
+          + (isActive ? 'color:#00d2ff;' : 'color:rgba(255,255,255,0.5);');
+        btnLabel.textContent = m.label;
+        btn.appendChild(btnLabel);
+        var btnDesc = document.createElement('div');
+        btnDesc.style.cssText = 'font-size:8px;margin-top:2px;line-height:1.2;'
+          + (isActive ? 'color:rgba(0,210,255,0.6);' : 'color:rgba(255,255,255,0.25);');
+        btnDesc.textContent = m.desc;
+        btn.appendChild(btnDesc);
+        btn.addEventListener('click', (function(mid) {
+          return function(e) {
+            e.stopPropagation(); e.preventDefault();
+            if (window.webkit && window.webkit.messageHandlers &&
+                window.webkit.messageHandlers.FrankMode) {
+              window.webkit.messageHandlers.FrankMode.postMessage(mid);
+            }
+          };
+        })(m.id), true);
+        btn.addEventListener('mousedown', function(e){ e.stopPropagation(); }, true);
+        modeRow.appendChild(btn);
+      }
+      panel.appendChild(modeRow);
+
       // Restart button
       var restartBtn = document.createElement('div');
       restartBtn.textContent = '\\u21BB  Restart Song';
@@ -292,6 +344,25 @@ class WebviewOverlay {
           btn.style.background = 'rgba(255,255,255,0.08)';
           btn.style.borderColor = 'rgba(255,255,255,0.1)';
           btn.style.color = 'rgba(255,255,255,0.6)';
+        }
+      }
+    })();
+  ''';
+
+  static String updateModeJs(String modeId) => '''
+    (function() {
+      var ids = ['pitchClass','contour','interval','streak'];
+      for (var i = 0; i < ids.length; i++) {
+        var btn = document.getElementById('fk-mode-' + ids[i]);
+        if (!btn) continue;
+        if (ids[i] === '$modeId') {
+          btn.style.background = 'rgba(0,210,255,0.3)';
+          btn.style.borderColor = 'rgba(0,210,255,0.6)';
+          btn.style.color = '#00d2ff';
+        } else {
+          btn.style.background = 'rgba(255,255,255,0.06)';
+          btn.style.borderColor = 'rgba(255,255,255,0.08)';
+          btn.style.color = 'rgba(255,255,255,0.5)';
         }
       }
     })();

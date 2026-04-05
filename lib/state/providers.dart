@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/audio_preset.dart';
+import '../core/scoring_mode.dart';
 import '../features/audio/audio_player_service.dart';
 import '../features/audio/mic_capture_service.dart';
 import '../features/youtube/youtube_audio_service.dart';
@@ -17,6 +18,7 @@ final audioEffectProvider = StateProvider<AudioEffect>((ref) => AudioEffect.none
 final pitchShiftProvider = StateProvider<int>((ref) => 0);
 
 // Scoring
+final scoringModeProvider = StateProvider<ScoringMode>((ref) => ScoringMode.pitchClass);
 final currentScoreProvider = StateProvider<int>((ref) => 0);
 
 // Services
