@@ -93,6 +93,24 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
     _injectBridge();
     _runJs(_cleanYouTubeUiJs);
     _runJs(_replaceLogoJs);
+    // Dump header DOM for logo debugging.
+    Future.delayed(const Duration(seconds: 3), () async {
+      try {
+        final result = await _controller.runJavaScriptReturningResult('''
+          (function() {
+            var h = document.querySelector('header')
+              || document.querySelector('#masthead')
+              || document.querySelector('ytd-masthead');
+            if (!h) return 'NO_HEADER';
+            var html = h.innerHTML.substring(0, 800);
+            return html;
+          })();
+        ''');
+        debugPrint('HEADER: $result');
+      } catch (e) {
+        debugPrint('HEADER err: $e');
+      }
+    });
     // Block auto-play: intercept the video element whenever it appears.
     // YouTube dynamically creates/replaces video elements, so we use
     // MutationObserver to catch them all. Every video gets a play listener
@@ -186,25 +204,27 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
     (function() {
       var logoDataUri = 'data:image/png;base64,$kLogoDarkBase64';
       function replaceLogo() {
-        // Use CSS to hide YouTube's logo SVG and show ours instead.
-        // This survives YouTube's JS re-renders because CSS rules persist.
+        // CSS-based replacement using exact selectors from the live DOM.
+        // YouTube mobile uses: ytm-home-logo > button > c3-icon.mobile-topbar-logo > svg
+        // YouTube desktop uses: ytd-topbar-logo-renderer > a > yt-icon > svg
         var styleId = 'fk-logo-style';
         if (!document.getElementById(styleId)) {
           var st = document.createElement('style');
           st.id = styleId;
           st.textContent = ''
-            + 'ytd-topbar-logo-renderer yt-icon svg,'
-            + 'ytd-topbar-logo-renderer ytd-logo svg,'
+            // Hide YouTube's SVG logos.
+            + 'c3-icon.mobile-topbar-logo svg,'
+            + 'c3-icon#home-icon svg,'
+            + 'ytm-home-logo svg,'
             + 'ytd-topbar-logo-renderer svg,'
-            + 'ytm-logo svg,'
-            + '#logo svg,'
-            + '#logo yt-icon,'
-            + '#logo-icon svg'
+            + 'ytd-topbar-logo-renderer yt-icon'
             + '{ display:none!important; }'
-            + 'ytd-topbar-logo-renderer::before,'
-            + '#logo::before'
+            // Show our logo via ::after on the button/link that contains it.
+            + 'ytm-home-logo .mobile-topbar-header-endpoint::before,'
+            + 'ytd-topbar-logo-renderer a::before'
             + '{ content:"";display:inline-block;width:120px;height:22px;'
-            + 'background:url("' + logoDataUri + '") no-repeat center/contain; }';
+            + 'background:url("' + logoDataUri + '") no-repeat left center/contain;'
+            + 'vertical-align:middle; }';
           document.head.appendChild(st);
         }
       }
