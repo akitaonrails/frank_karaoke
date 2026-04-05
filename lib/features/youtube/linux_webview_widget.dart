@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -257,16 +258,22 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
   void _onScoreUpdate(ScoringUpdate update) {
     if (!_created || !_overlayInjected) return;
 
-    if (update.totalScore != _lastInjectedScore) {
-      _lastInjectedScore = update.totalScore;
+    // Update both live and overall scores.
+    final liveScore = update.totalScore;
+    final overallScore = _scoringSession?.finalScore ?? liveScore;
+    if (liveScore != _lastInjectedScore) {
+      _lastInjectedScore = liveScore;
       _controller.evaluateJavascript(
-        source: WebviewOverlay.updateScoreJs(update.totalScore),
+        source: WebviewOverlay.updateScoreJs(liveScore, overallScore),
       );
-      ref.read(currentScoreProvider.notifier).state = update.totalScore;
+      ref.read(currentScoreProvider.notifier).state = liveScore;
     }
 
+    // Normalize pitch using log scale for better visual distribution.
+    // Singing range ~100-800 Hz mapped with log scale so C3-C5 fills
+    // most of the canvas instead of being crammed at the bottom.
     final normalizedPitch = update.singerPitchHz > 0
-        ? ((update.singerPitchHz - 80) / 720).clamp(0.0, 1.0)
+        ? _logNormalize(update.singerPitchHz, 100, 800)
         : 0.0;
     _controller.evaluateJavascript(
       source: WebviewOverlay.updatePitchTrailJs(
@@ -312,6 +319,14 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
       );
       _overlayInjected = false;
     }
+  }
+
+  /// Log-scale normalization: maps [minHz, maxHz] to [0, 1] using log scale.
+  /// This spreads the singing range (C3-C5) across the full canvas height.
+  double _logNormalize(double hz, double minHz, double maxHz) {
+    if (hz <= minHz) return 0;
+    if (hz >= maxHz) return 1;
+    return (math.log(hz / minHz) / math.log(maxHz / minHz)).clamp(0.0, 1.0);
   }
 
   void _reinjectOverlay() {

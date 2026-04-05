@@ -74,6 +74,25 @@ class WebviewOverlay {
       scoreFeedback.style.cssText = 'font-size:11px;color:rgba(255,255,255,0.5);'
         + 'margin-top:4px;min-height:14px;transition:color 0.3s;';
       scoreBox.appendChild(scoreFeedback);
+
+      // Overall score (smaller, below live score)
+      var overallRow = document.createElement('div');
+      overallRow.style.cssText = 'margin-top:8px;padding-top:8px;'
+        + 'border-top:1px solid rgba(255,255,255,0.1);'
+        + 'display:flex;align-items:baseline;justify-content:center;gap:6px;';
+      var overallLabel = document.createElement('div');
+      overallLabel.style.cssText = 'font-size:9px;color:rgba(255,255,255,0.3);'
+        + 'letter-spacing:2px;';
+      overallLabel.textContent = 'OVERALL';
+      overallRow.appendChild(overallLabel);
+      var overallValue = document.createElement('div');
+      overallValue.id = 'fk-overall-value';
+      overallValue.style.cssText = 'font-size:20px;font-weight:700;'
+        + 'color:rgba(255,255,255,0.5);transition:color 0.5s;';
+      overallValue.textContent = '0';
+      overallRow.appendChild(overallValue);
+      scoreBox.appendChild(overallRow);
+
       overlay.appendChild(scoreBox);
 
       // --- Pitch canvas (bottom left) ---
@@ -276,28 +295,35 @@ class WebviewOverlay {
     ''';
   }
 
-  static String updateScoreJs(int score) {
+  static String updateScoreJs(int liveScore, int overallScore) {
     String color, glow, feedback;
-    if (score >= 90) {
+    if (liveScore >= 90) {
       color = '#ffd700'; glow = '0 0 30px rgba(255,215,0,0.7)'; feedback = 'AMAZING!';
-    } else if (score >= 75) {
+    } else if (liveScore >= 75) {
       color = '#00ff88'; glow = '0 0 20px rgba(0,255,136,0.5)'; feedback = 'Great singing!';
-    } else if (score >= 50) {
+    } else if (liveScore >= 50) {
       color = '#00d2ff'; glow = '0 0 20px rgba(0,210,255,0.4)'; feedback = 'Keep it up!';
-    } else if (score >= 25) {
+    } else if (liveScore >= 25) {
       color = '#ff9f43'; glow = '0 0 15px rgba(255,159,67,0.4)'; feedback = 'Getting there...';
     } else {
       color = '#ff6b6b'; glow = '0 0 15px rgba(255,107,107,0.3)'; feedback = '';
     }
+    // Overall score color: dim version of live color
+    String oColor;
+    if (overallScore >= 75) { oColor = 'rgba(0,255,136,0.7)'; }
+    else if (overallScore >= 50) { oColor = 'rgba(0,210,255,0.7)'; }
+    else { oColor = 'rgba(255,255,255,0.5)'; }
     return '''
       (function() {
         var el = document.getElementById('fk-score-value');
         if (!el) return;
-        el.textContent = '$score';
+        el.textContent = '$liveScore';
         el.style.color = '$color';
         el.style.textShadow = '$glow';
         var fb = document.getElementById('fk-feedback');
         if (fb) { fb.textContent = '$feedback'; fb.style.color = '$color'; }
+        var ov = document.getElementById('fk-overall-value');
+        if (ov) { ov.textContent = '$overallScore'; ov.style.color = '$oColor'; }
       })();
     ''';
   }
@@ -314,10 +340,12 @@ class WebviewOverlay {
         var trail=window._fkTrail;
         var ctx=canvas.getContext('2d'), w=canvas.width, h=canvas.height, pad=6;
         ctx.clearRect(0,0,w,h);
-        var nf=[130.81,261.63,523.25,1046.50], nn=['C3','C4','C5','C6'];
+        // Note grid with log scale (matches Dart's _logNormalize(hz, 100, 800))
+        var nf=[130.81,196,261.63,392,523.25,783.99], nn=['C3','G3','C4','G4','C5','G5'];
+        var logMin=Math.log(100), logRange=Math.log(800)-logMin;
         ctx.font='9px system-ui';
         for(var n=0;n<nf.length;n++){
-          var ny=(nf[n]-80)/720; if(ny<0||ny>1)continue;
+          var ny=(Math.log(nf[n])-logMin)/logRange; if(ny<0||ny>1)continue;
           var y=h-(ny*(h-2*pad))-pad;
           ctx.strokeStyle='rgba(255,255,255,0.06)'; ctx.lineWidth=1;
           ctx.beginPath();ctx.moveTo(24,y);ctx.lineTo(w,y);ctx.stroke();
