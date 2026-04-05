@@ -69,25 +69,25 @@ For detailed technical background, see [docs/scoring.md](docs/scoring.md).
 
 Each mode evaluates a different aspect of singing quality. Tap the score box during playback to switch modes.
 
-#### Pitch Match
+#### 🎯 Pitch Match
 
 **Best for:** Songs you know well
 
 Scores how cleanly you hit musical notes. The app detects your pitch and checks if it lands precisely on a note (C, D, E...) rather than drifting between notes. Holding steady notes scores higher than wobbling. Uses the YIN algorithm for pitch detection with a bandpass filter to isolate vocal frequencies.
 
-#### Contour
+#### 〰️ Contour
 
 **Best for:** Learning new songs
 
 Scores the *shape* of your melody — are you going up when the melody goes up, and down when it goes down? This mode doesn't care which exact note you hit, only the direction and flow of your singing. Measures pitch range and significant melodic movement over a rolling window.
 
-#### Intervals
+#### 📐 Intervals
 
 **Best for:** Singing in a different key
 
 Scores the *jumps* between consecutive notes. A step of 2 semitones (whole step) scores highest. Small musical intervals like thirds and fourths score well. Wild jumps of an octave or more score low. Rewards proper musical phrasing regardless of which key you're singing in. Uses a Gaussian scoring curve centered at the whole step.
 
-#### Streak
+#### 🔥 Streak
 
 **Best for:** Parties and competition
 
