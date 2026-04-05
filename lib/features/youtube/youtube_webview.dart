@@ -186,28 +186,27 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
     (function() {
       var logoDataUri = 'data:image/png;base64,$kLogoDarkBase64';
       function replaceLogo() {
-        if (document.querySelector('img.fk-logo')) return;
-        // Find YouTube's logo — it's typically an SVG or yt-icon inside
-        // a link in the header/masthead area.
-        var header = document.querySelector('header, #masthead-container, #masthead, ytd-masthead, ytm-mobile-topbar-renderer');
-        if (!header) return;
-        // Look for the logo link (usually first link in header).
-        var logoLink = header.querySelector('a[href="/"], ytd-topbar-logo-renderer a, .topbar-logo-renderer a');
-        if (!logoLink) {
-          // Fallback: first link in header.
-          logoLink = header.querySelector('a');
+        // Use CSS to hide YouTube's logo SVG and show ours instead.
+        // This survives YouTube's JS re-renders because CSS rules persist.
+        var styleId = 'fk-logo-style';
+        if (!document.getElementById(styleId)) {
+          var st = document.createElement('style');
+          st.id = styleId;
+          st.textContent = ''
+            + 'ytd-topbar-logo-renderer yt-icon svg,'
+            + 'ytd-topbar-logo-renderer ytd-logo svg,'
+            + 'ytd-topbar-logo-renderer svg,'
+            + 'ytm-logo svg,'
+            + '#logo svg,'
+            + '#logo yt-icon,'
+            + '#logo-icon svg'
+            + '{ display:none!important; }'
+            + 'ytd-topbar-logo-renderer::before,'
+            + '#logo::before'
+            + '{ content:"";display:inline-block;width:120px;height:22px;'
+            + 'background:url("' + logoDataUri + '") no-repeat center/contain; }';
+          document.head.appendChild(st);
         }
-        if (!logoLink) return;
-        // Hide original logo content.
-        logoLink.querySelectorAll('svg, yt-icon, ytd-logo, img:not(.fk-logo), span').forEach(function(el) {
-          el.style.cssText = 'display:none!important';
-        });
-        // Insert our logo.
-        var img = document.createElement('img');
-        img.className = 'fk-logo';
-        img.src = logoDataUri;
-        img.style.cssText = 'height:22px;object-fit:contain;display:inline-block;vertical-align:middle;';
-        logoLink.prepend(img);
       }
       replaceLogo();
       setTimeout(replaceLogo, 1000);
