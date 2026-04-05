@@ -295,7 +295,6 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
       await _runJs(WebviewOverlay.injectOverlayJs(
         singerName: title,
         activePreset: preset.name,
-        activeScoringMode: mode.name,
         pitchShift: pitchShift,
       ));
       _overlayInjected = true;
@@ -372,12 +371,10 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
     if (!_overlayInjected) return;
     final title = ref.read(currentVideoTitleProvider) ?? '';
     final preset = ref.read(audioPresetProvider);
-    final mode = ref.read(scoringModeProvider);
     final pitchShift = ref.read(pitchShiftProvider);
     _runJs(WebviewOverlay.injectOverlayJs(
       singerName: title,
       activePreset: preset.name,
-      activeScoringMode: mode.name,
       pitchShift: pitchShift,
     ));
   }
@@ -422,7 +419,6 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
     if (mode == null) return;
     ref.read(scoringModeProvider.notifier).state = mode;
     _saveSetting('scoring_mode', mode.name);
-    if (_overlayInjected) _runJs(WebviewOverlay.updateModeJs(mode.name));
     if (_scoringSession != null) _restartScoring();
   }
 
