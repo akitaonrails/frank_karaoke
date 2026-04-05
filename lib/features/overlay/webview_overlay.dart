@@ -150,14 +150,14 @@ class WebviewOverlay {
       var overlay = document.createElement('div');
       overlay.id = 'fk-overlay';
 
-      // --- Gear button (top left, toggles settings panel) ---
+      // --- Gear button (bottom left, above pitch canvas) ---
       var gearBtn = document.createElement('div');
       gearBtn.id = 'fk-gear';
       gearBtn.textContent = '\\u2699';
-      gearBtn.style.cssText = 'position:fixed;top:14px;left:14px;z-index:100001;'
-        + 'width:40px;height:40px;border-radius:50%;'
+      gearBtn.style.cssText = 'position:fixed;bottom:150px;left:24px;z-index:100001;'
+        + 'width:36px;height:36px;border-radius:50%;'
         + 'background:rgba(0,0,0,0.7);color:rgba(255,255,255,0.6);'
-        + 'font-size:22px;display:flex;align-items:center;justify-content:center;'
+        + 'font-size:20px;display:flex;align-items:center;justify-content:center;'
         + 'cursor:pointer;pointer-events:auto;'
         + 'border:1px solid rgba(255,255,255,0.2);transition:all 0.2s ease;'
         + 'user-select:none;-webkit-user-select:none;';
@@ -290,12 +290,12 @@ class WebviewOverlay {
         + 'box-shadow:0 4px 30px rgba(0,0,0,0.5);';
       overlay.appendChild(pitchCanvas);
 
-      // --- Settings panel (right side, hidden by default) ---
+      // --- Settings panel (above gear button, hidden by default) ---
       var panel = document.createElement('div');
       panel.id = 'fk-controls';
-      panel.style.cssText = 'position:fixed;top:14px;left:60px;z-index:100000;'
-        + 'width:280px;background:rgba(0,0,0,0.9);border-radius:16px;'
-        + 'padding:16px;font-family:system-ui,sans-serif;color:#fff;'
+      panel.style.cssText = 'position:fixed;bottom:190px;left:24px;z-index:100000;'
+        + 'width:260px;background:rgba(0,0,0,0.92);border-radius:16px;'
+        + 'padding:14px;font-family:system-ui,sans-serif;color:#fff;'
         + 'pointer-events:auto;border:1px solid rgba(108,92,231,0.4);'
         + 'box-shadow:0 8px 40px rgba(0,0,0,0.7);display:none;';
 

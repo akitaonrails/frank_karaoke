@@ -91,6 +91,8 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
     setState(() => _isReady = true);
     _injectBridge();
     _runJs(_cleanYouTubeUiJs);
+    // Pause any auto-playing video immediately on page load.
+    _runJs('''(function(){var v=document.querySelector('video');if(v)v.pause();})();''');
     if (!_welcomeShown && !_welcomeDismissedPermanently) {
       _welcomeShown = true;
       _runJs(WebviewOverlay.welcomeOverlayJs);
@@ -139,7 +141,14 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
       s.textContent = '#secondary{display:none!important}'
         + '#comments{display:none!important}'
         + '#related{display:none!important}'
-        + 'ytd-watch-next-secondary-results-renderer{display:none!important}';
+        + 'ytd-watch-next-secondary-results-renderer{display:none!important}'
+        + '.ytd-mealbar-promo-renderer{display:none!important}'
+        + 'ytd-mealbar-promo-renderer{display:none!important}'
+        + '.ytd-banner-promo-renderer{display:none!important}'
+        + 'tp-yt-paper-dialog{display:none!important}'
+        + '.yt-mealbar-promo-renderer{display:none!important}'
+        + '[class*="open-app"]{display:none!important}'
+        + '.smartimation-background{display:none!important}';
       document.head.appendChild(s);
     })();
   ''';
