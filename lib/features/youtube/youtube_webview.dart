@@ -182,24 +182,21 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
   }
 
   Future<void> _buildOracleInBackground(String videoId, AudioStreamInfo streamInfo) async {
+    _runJs(WebviewOverlay.processingOverlayJs(true,
+        message: 'Loading song data...'));
     try {
       final oracle = ref.read(pitchOracleProvider);
-
-      _runJs(WebviewOverlay.processingOverlayJs(true,
-          message: 'Loading song data...'));
-
       final built = await oracle.buildForVideo(videoId, streamInfo);
       debugPrint('PitchOracle: ${built ? "ready (${oracle.entryCount} entries)" : "failed"}');
 
-      if (mounted) {
-        _runJs(WebviewOverlay.processingOverlayJs(false));
-        if (built && _scoringSession != null) {
-          _scoringSession!.setOracle(oracle);
-        }
+      if (built && mounted && _scoringSession != null) {
+        _scoringSession!.setOracle(oracle);
       }
     } catch (e) {
       debugPrint('PitchOracle: error: $e');
-      if (mounted) _runJs(WebviewOverlay.processingOverlayJs(false));
+    } finally {
+      // Always dismiss, even on timeout/failure/unmount.
+      _runJs(WebviewOverlay.processingOverlayJs(false));
     }
   }
 
