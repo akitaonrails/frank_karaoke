@@ -346,12 +346,14 @@ class _LinuxWebViewWidgetState extends ConsumerState<LinuxWebViewWidget> {
   void _onScoreUpdate(ScoringUpdate update) {
     if (!_created || !_overlayInjected) return;
 
-    if (update.totalScore != _lastInjectedScore) {
+    if (update.totalScore != _lastInjectedScore ||
+        (_scoringSession?.mode == ScoringMode.streak)) {
       _lastInjectedScore = update.totalScore;
       _controller.evaluateJavascript(
         source: WebviewOverlay.updateScoreJs(
           update.totalScore,
           update.overallScore,
+          streakCount: update.streakCount,
         ),
       );
       ref.read(currentScoreProvider.notifier).state = update.totalScore;

@@ -67,7 +67,6 @@ class ScoringSession {
 
   // Streak mode
   int _streakCount = 0;
-  static const _streakThreshold = 0.4;
 
   // Silence gap tracking — reset pitch history after prolonged silence
   int _silentFrames = 0;
@@ -243,16 +242,22 @@ class ScoringSession {
         + stabilityScore * 0.30
         + dynamicsScore * 0.10;
 
-    // Streak mode: apply multiplier
+    // Streak mode: combo system
     if (_mode == ScoringMode.streak) {
-      if (frameScore >= _streakThreshold) {
+      if (primaryScore >= 0.5) {
+        // Good frame: build streak
         _streakCount++;
+        // Bonus ramps with streak: 0 at start, up to +0.4 at 30+ streak
+        final streakBonus = math.min(_streakCount, 30) / 75.0;
+        frameScore = (frameScore + streakBonus).clamp(0.0, 1.0);
       } else {
+        // Bad frame: break streak and punish hard
+        if (_streakCount > 5) {
+          // Lost a good streak — push a penalty into the EMA
+          frameScore = 0.05;
+        }
         _streakCount = 0;
       }
-      // Multiplier: 1x at 0, ramps up to 3x at 50+ streak
-      final multiplier = 1.0 + math.min(_streakCount, 50) / 25.0;
-      frameScore = (frameScore * multiplier).clamp(0.0, 1.0);
     }
 
     _pushScore(frameScore);

@@ -506,9 +506,16 @@ class WebviewOverlay {
     ''';
   }
 
-  static String updateScoreJs(int liveScore, int overallScore) {
+  static String updateScoreJs(int liveScore, int overallScore,
+      {int streakCount = 0}) {
     String color, glow, feedback;
-    if (liveScore >= 90) {
+    if (streakCount > 20) {
+      color = '#ffd700'; glow = '0 0 30px rgba(255,215,0,0.7)';
+      feedback = '\u{1F525} ${streakCount}x COMBO!';
+    } else if (streakCount > 10) {
+      color = '#ff9f43'; glow = '0 0 20px rgba(255,159,67,0.5)';
+      feedback = '\u{1F525} ${streakCount}x streak';
+    } else if (liveScore >= 90) {
       color = '#ffd700'; glow = '0 0 30px rgba(255,215,0,0.7)'; feedback = 'AMAZING!';
     } else if (liveScore >= 75) {
       color = '#00ff88'; glow = '0 0 20px rgba(0,255,136,0.5)'; feedback = 'Great singing!';
@@ -517,7 +524,8 @@ class WebviewOverlay {
     } else if (liveScore >= 25) {
       color = '#ff9f43'; glow = '0 0 15px rgba(255,159,67,0.4)'; feedback = 'Getting there...';
     } else {
-      color = '#ff6b6b'; glow = '0 0 15px rgba(255,107,107,0.3)'; feedback = '';
+      color = '#ff6b6b'; glow = '0 0 15px rgba(255,107,107,0.3)';
+      feedback = streakCount == 0 && liveScore < 15 ? 'Streak broken!' : '';
     }
     String oColor;
     if (overallScore >= 75) { oColor = 'rgba(0,255,136,0.7)'; }
