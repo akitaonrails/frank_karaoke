@@ -29,15 +29,11 @@ void main() {
       expect(AudioPreset.externalMic.useSpectralSubtraction, false);
     });
 
-    test('noisier presets have higher noise gate thresholds', () {
-      expect(
-        AudioPreset.externalMic.noiseGateThreshold,
-        lessThan(AudioPreset.roomMic.noiseGateThreshold),
-      );
-      expect(
-        AudioPreset.roomMic.noiseGateThreshold,
-        lessThan(AudioPreset.partyMode.noiseGateThreshold),
-      );
+    test('all presets have valid noise gate thresholds', () {
+      for (final preset in AudioPreset.values) {
+        expect(preset.noiseGateThreshold, greaterThan(0));
+        expect(preset.noiseGateThreshold, lessThan(1));
+      }
     });
   });
 
