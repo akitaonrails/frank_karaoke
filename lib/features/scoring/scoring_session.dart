@@ -27,6 +27,8 @@ class ScoringSession {
   PitchOracle? _oracle;
   final double _noiseGateThreshold;
   final double _singingThreshold;
+  final double _pitchTolerance;
+  final int _pitchShift; // semitones offset for scoring comparison
   final ScoringMode _mode;
 
   StreamSubscription<MicFrame>? _micSub;
@@ -75,6 +77,7 @@ class ScoringSession {
     required MicCaptureService mic,
     required AudioPreset preset,
     required ScoringMode mode,
+    int pitchShift = 0,
     PitchOracle? oracle,
     double? calibratedNoiseGate,
     double? calibratedSingingThreshold,
@@ -85,7 +88,9 @@ class ScoringSession {
         _voiceIsolator = VoiceIsolator(preset: preset),
         _bandpass = BandpassFilter(),
         _noiseGateThreshold = calibratedNoiseGate ?? preset.noiseGateThreshold,
-        _singingThreshold = calibratedSingingThreshold ?? 0.02;
+        _singingThreshold = calibratedSingingThreshold ?? 0.02,
+        _pitchTolerance = preset.pitchTolerance,
+        _pitchShift = pitchShift;
 
   Stream<ScoringUpdate> get scoreStream => _scoreController.stream;
   bool get isActive => _isActive;
@@ -259,7 +264,9 @@ class ScoringSession {
 
     final pitchHz = result.pitchHz;
     final confidence = result.confidence;
-    final singerMidi = hzToMidi(pitchHz);
+    // Apply pitch shift: if user set +2 semitones, shift singer's detected
+    // pitch down by 2 for comparison, so they can sing higher and still match.
+    final singerMidi = hzToMidi(pitchHz) - _pitchShift;
 
     // Update pitch history
     _recentPitches.add(singerMidi);
@@ -356,7 +363,10 @@ class ScoringSession {
     // Weighted by confidence — low-confidence detections shouldn't
     // get credit for accidentally landing near a note.
     final deviation = (singerMidi - singerMidi.roundToDouble()).abs() * 100;
-    final rawSnap = (1.0 - deviation / 40.0).clamp(0.0, 1.0);
+    // Snap tolerance scales with preset: tighter for External Mic, looser for Party.
+    // pitchTolerance is in semitones (1.5-3.5), convert to cents for snap comparison.
+    final snapTolerance = _pitchTolerance * 100 / 3; // ~50-117 cents
+    final rawSnap = (1.0 - deviation / snapTolerance).clamp(0.0, 1.0);
     final cleanScore = rawSnap * confScore; // only counts if confident
 
     // 3. Musicality: pitch variety + interval quality
@@ -417,7 +427,7 @@ class ScoringSession {
     final refClass = refMidi % 12;
     var dist = (singerClass - refClass).abs();
     if (dist > 6) dist = 12 - dist;
-    return (1.0 - dist / 3.0).clamp(0.0, 1.0);
+    return (1.0 - dist / _pitchTolerance).clamp(0.0, 1.0);
   }
 
   double _refContourScore(double singerMidi, double refMidi) {

@@ -274,14 +274,16 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
 
   void _onVideoPlay() {
     debugPrint('Video: play');
-    if (_scoringSession != null && !_scoringSession!.isActive) {
-      // Resume scoring after a short delay.
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted && _scoringSession != null) {
-          _scoringSession!.resume();
-          debugPrint('Scoring: resumed');
-        }
-      });
+    if (_scoringSession != null) {
+      if (_scoringSession!.isPaused) {
+        // Was paused — resume after a short delay.
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted && _scoringSession != null) {
+            _scoringSession!.resume();
+            debugPrint('Scoring: resumed');
+          }
+        });
+      }
     }
   }
 
@@ -362,11 +364,13 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
     final calGate = ref.read(calibratedNoiseGateProvider);
     final calSinging = ref.read(calibratedSingingThresholdProvider);
 
+    final pitchShift = ref.read(pitchShiftProvider);
     final oracle = ref.read(pitchOracleProvider);
     _scoringSession = ScoringSession(
       mic: mic,
       preset: preset,
       mode: mode,
+      pitchShift: pitchShift,
       oracle: oracle.isReady ? oracle : null,
       calibratedNoiseGate: calGate,
       calibratedSingingThreshold: calSinging,
@@ -383,7 +387,6 @@ class _YouTubeWebViewState extends ConsumerState<YouTubeWebView> {
 
     // Inject overlay
     final title = ref.read(currentVideoTitleProvider) ?? '';
-    final pitchShift = ref.read(pitchShiftProvider);
     try {
       await _runJs(WebviewOverlay.injectOverlayJs(
         singerName: title,

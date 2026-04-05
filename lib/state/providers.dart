@@ -19,9 +19,8 @@ final pitchShiftProvider = StateProvider<int>((ref) => 0);
 final scoringModeProvider = StateProvider<ScoringMode>((ref) => ScoringMode.pitchClass);
 final currentScoreProvider = StateProvider<int>((ref) => 0);
 
-// Calibrated noise gate (null = use preset default)
+// Calibrated thresholds (null = use preset defaults)
 final calibratedNoiseGateProvider = StateProvider<double?>((ref) => null);
-// Calibrated singing threshold (null = use default 0.04)
 final calibratedSingingThresholdProvider = StateProvider<double?>((ref) => null);
 
 // Services

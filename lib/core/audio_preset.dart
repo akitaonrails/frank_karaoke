@@ -6,7 +6,7 @@ enum AudioPreset {
     description: 'Bluetooth or wired mic connected to device',
     icon: 'mic_external_on',
     pitchTolerance: kExternalMicTolerance,
-    noiseGateThreshold: 0.0005,
+    noiseGateThreshold: 0.001,
     useSpectralSubtraction: false,
   ),
   roomMic(
@@ -14,7 +14,7 @@ enum AudioPreset {
     description: 'Built-in device microphone',
     icon: 'phone_android',
     pitchTolerance: kRoomMicTolerance,
-    noiseGateThreshold: 0.0005,
+    noiseGateThreshold: 0.003,
     useSpectralSubtraction: true,
   ),
   partyMode(
@@ -22,7 +22,7 @@ enum AudioPreset {
     description: 'Noisy environment, scoring for fun',
     icon: 'celebration',
     pitchTolerance: kPartyModeTolerance,
-    noiseGateThreshold: 0.0003,
+    noiseGateThreshold: 0.008,
     useSpectralSubtraction: true,
   );
 
