@@ -9,11 +9,14 @@ import '../../core/constants.dart';
 /// On Android with built-in mic, the mic picks up:
 ///   voice + instrumental (from speaker) + room reverb + speaker effects
 ///
-/// We have the clean instrumental audio from just_audio. Using spectral
-/// subtraction, we can remove (most of) the instrumental component,
-/// leaving a cleaner voice signal for pitch detection.
+/// When a clean instrumental reference frame is supplied, spectral
+/// subtraction can remove (most of) the instrumental component, leaving a
+/// cleaner voice signal for pitch detection.
 ///
-/// On desktop with an external mic, this is mostly a no-op (clean signal).
+/// NOTE: a live reference PCM tap is not currently wired up — the just_audio
+/// reference path was removed (YouTube's CDN blocks non-browser playback), so
+/// today only the high-pass stage runs and reference pitch comes from the
+/// pitch oracle. The subtraction code is kept for when reference audio returns.
 class VoiceIsolator {
   final AudioPreset _preset;
   final int _sampleRate;
@@ -48,8 +51,9 @@ class VoiceIsolator {
   /// Process a mic audio frame. Returns the cleaned voice signal.
   ///
   /// [micSamples] is the raw mic input (may contain voice + music).
-  /// [referenceSamples] is the clean instrumental audio from just_audio
-  /// (null on Linux where we don't have PCM access).
+  /// [referenceSamples] is a clean instrumental frame for spectral
+  /// subtraction, or null when no reference audio is available (the current
+  /// default — see the class doc).
   Float64List process(Float64List micSamples, {Float64List? referenceSamples}) {
     var result = micSamples;
 

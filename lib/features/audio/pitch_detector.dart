@@ -74,7 +74,7 @@ class PitchDetector {
     if (betterTau <= 0) return PitchResult.none;
 
     final pitchHz = sampleRate / betterTau;
-    // Confidence: CMNDF minimum of 0.0 = perfect, 0.15 = threshold.
+    // Confidence: CMNDF minimum of 0.0 = perfect; at `threshold` it maps to 0.
     // Map to 0.0-1.0: lower CMNDF = higher confidence.
     final confidence = (1.0 - cmndfMin / threshold).clamp(0.0, 1.0);
 
