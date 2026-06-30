@@ -150,8 +150,11 @@ class ScoringSession {
     _streakCount = 0;
     _recentPitches.clear();
     _singerContour.clear();
+    _refContour.clear();
     _prevSingerMidi = 0;
     _prevSingerPitch = 0;
+    _prevRefMidi = 0;
+    _prevRefPitch = 0;
     _warmupDone = false;
     _warmupTimer?.cancel();
     _warmupTimer = Timer(const Duration(seconds: 5), () {
