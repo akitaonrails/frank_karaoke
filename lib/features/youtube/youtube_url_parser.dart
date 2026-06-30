@@ -24,5 +24,10 @@ String? extractVideoId(String url) {
     return uri.pathSegments[1];
   }
 
+  // Live: youtube.com/live/VIDEO_ID (live streams and premieres)
+  if (uri.pathSegments.length >= 2 && uri.pathSegments[0] == 'live') {
+    return uri.pathSegments[1];
+  }
+
   return null;
 }

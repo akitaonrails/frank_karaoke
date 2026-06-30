@@ -53,6 +53,20 @@ void main() {
       );
     });
 
+    test('extracts from live URL', () {
+      expect(
+        extractVideoId('https://www.youtube.com/live/dQw4w9WgXcQ'),
+        'dQw4w9WgXcQ',
+      );
+    });
+
+    test('extracts from live URL with params', () {
+      expect(
+        extractVideoId('https://www.youtube.com/live/dQw4w9WgXcQ?feature=share'),
+        'dQw4w9WgXcQ',
+      );
+    });
+
     test('returns null for youtube homepage', () {
       expect(extractVideoId('https://www.youtube.com'), isNull);
     });
