@@ -60,8 +60,10 @@ class PitchDetector {
       }
       _debugCount++;
       if (_debugCount <= 5 || _debugCount % 200 == 0) {
-        debugPrint('YIN: no pitch, minCMNDF=${minCmndf.toStringAsFixed(3)}, '
-            'threshold=$threshold, samples=${samples.length}');
+        debugPrint(
+          'YIN: no pitch, minCMNDF=${minCmndf.toStringAsFixed(3)}, '
+          'threshold=$threshold, samples=${samples.length}',
+        );
       }
       return PitchResult.none;
     }
@@ -82,7 +84,9 @@ class PitchDetector {
   }
 
   Float64List _differenceFunction(Float64List samples, int halfLen) {
-    if (_diffBuf == null || _diffBuf!.length != halfLen) _diffBuf = Float64List(halfLen);
+    if (_diffBuf == null || _diffBuf!.length != halfLen) {
+      _diffBuf = Float64List(halfLen);
+    }
     final diff = _diffBuf!;
     for (var tau = 1; tau < halfLen; tau++) {
       double sum = 0.0;
@@ -96,7 +100,9 @@ class PitchDetector {
   }
 
   Float64List _cumulativeMeanNormalized(Float64List diff, int halfLen) {
-    if (_cmndfBuf == null || _cmndfBuf!.length != halfLen) _cmndfBuf = Float64List(halfLen);
+    if (_cmndfBuf == null || _cmndfBuf!.length != halfLen) {
+      _cmndfBuf = Float64List(halfLen);
+    }
     final cmndf = _cmndfBuf!;
     cmndf[0] = 1.0;
     double runningSum = 0.0;
@@ -108,7 +114,10 @@ class PitchDetector {
   }
 
   /// Returns (tau, cmndfMinValue) or null if no pitch detected.
-  (int, double)? _absoluteThresholdWithConfidence(Float64List cmndf, int halfLen) {
+  (int, double)? _absoluteThresholdWithConfidence(
+    Float64List cmndf,
+    int halfLen,
+  ) {
     final minTau = sampleRate ~/ 1000;
     for (var tau = minTau; tau < halfLen; tau++) {
       if (cmndf[tau] < threshold) {

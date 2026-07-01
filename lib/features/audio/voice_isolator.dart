@@ -15,8 +15,9 @@ import '../../core/constants.dart';
 ///
 /// NOTE: a live reference PCM tap is not currently wired up — the just_audio
 /// reference path was removed (YouTube's CDN blocks non-browser playback), so
-/// today only the high-pass stage runs and reference pitch comes from the
-/// pitch oracle. The subtraction code is kept for when reference audio returns.
+/// today Room/Party presets only run the high-pass stage and reference pitch
+/// comes from the pitch oracle. The subtraction code is kept for when
+/// reference audio returns.
 class VoiceIsolator {
   final AudioPreset _preset;
   final int _sampleRate;
@@ -33,14 +34,12 @@ class VoiceIsolator {
   int _estimatedLagSamples = 0;
   int _lagCalibrationCount = 0;
 
-  VoiceIsolator({
-    required AudioPreset preset,
-    int sampleRate = kSampleRate,
-  })  : _preset = preset,
-        _sampleRate = sampleRate,
-        // High-pass filter coefficient for ~200 Hz cutoff.
-        // alpha = RC / (RC + dt), where RC = 1/(2*pi*fc), dt = 1/sr
-        _hpAlpha = _computeHpAlpha(200, sampleRate);
+  VoiceIsolator({required AudioPreset preset, int sampleRate = kSampleRate})
+    : _preset = preset,
+      _sampleRate = sampleRate,
+      // High-pass filter coefficient for ~200 Hz cutoff.
+      // alpha = RC / (RC + dt), where RC = 1/(2*pi*fc), dt = 1/sr
+      _hpAlpha = _computeHpAlpha(200, sampleRate);
 
   static double _computeHpAlpha(double cutoffHz, int sampleRate) {
     final rc = 1.0 / (2.0 * math.pi * cutoffHz);
