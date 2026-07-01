@@ -24,5 +24,17 @@ String? extractVideoId(String url) {
     return uri.pathSegments[1];
   }
 
+  // Live: youtube.com/live/VIDEO_ID (live streams and premieres)
+  if (_isYoutubeHost(uri.host) &&
+      uri.pathSegments.length >= 2 &&
+      uri.pathSegments[0] == 'live' &&
+      uri.pathSegments[1].isNotEmpty) {
+    return uri.pathSegments[1];
+  }
+
   return null;
+}
+
+bool _isYoutubeHost(String host) {
+  return host == 'youtube.com' || host.endsWith('.youtube.com');
 }
