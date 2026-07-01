@@ -88,16 +88,16 @@ class ScoringSession {
     PitchOracle? oracle,
     double? calibratedNoiseGate,
     double? calibratedSingingThreshold,
-  })  : _mic = mic,
-        _oracle = oracle,
-        _mode = mode,
-        _pitchDetector = PitchDetector(),
-        _voiceIsolator = VoiceIsolator(preset: preset),
-        _bandpass = BandpassFilter(),
-        _noiseGateThreshold = calibratedNoiseGate ?? preset.noiseGateThreshold,
-        _singingThreshold = calibratedSingingThreshold ?? 0.02,
-        _pitchTolerance = preset.pitchTolerance,
-        _pitchShift = pitchShift;
+  }) : _mic = mic,
+       _oracle = oracle,
+       _mode = mode,
+       _pitchDetector = PitchDetector(),
+       _voiceIsolator = VoiceIsolator(preset: preset),
+       _bandpass = BandpassFilter(),
+       _noiseGateThreshold = calibratedNoiseGate ?? preset.noiseGateThreshold,
+       _singingThreshold = calibratedSingingThreshold ?? 0.02,
+       _pitchTolerance = preset.pitchTolerance,
+       _pitchShift = pitchShift;
 
   Stream<ScoringUpdate> get scoreStream => _scoreController.stream;
   bool get isActive => _isActive;
@@ -123,7 +123,9 @@ class ScoringSession {
   /// Connect an oracle after the session has started (background loading).
   void setOracle(PitchOracle oracle) {
     _oracle = oracle;
-    debugPrint('ScoringSession: oracle connected (${oracle.entryCount} entries)');
+    debugPrint(
+      'ScoringSession: oracle connected (${oracle.entryCount} entries)',
+    );
   }
 
   /// Update the current video playback time (called from JS bridge).
@@ -150,8 +152,11 @@ class ScoringSession {
     _streakCount = 0;
     _recentPitches.clear();
     _singerContour.clear();
+    _refContour.clear();
     _prevSingerMidi = 0;
     _prevSingerPitch = 0;
+    _prevRefMidi = 0;
+    _prevRefPitch = 0;
     _warmupDone = false;
     _warmupTimer?.cancel();
     _warmupTimer = Timer(const Duration(seconds: 5), () {
@@ -208,9 +213,13 @@ class ScoringSession {
       debugPrint('Scoring: warmup complete');
     });
 
-    _micSub = _mic.pcmStream.listen((frame) => _onMicFrame(frame.samples, frame.rawPeak));
-    debugPrint('ScoringSession: started mode=${_mode.name} '
-        'ref=${_hasReference ? "yes" : "no"}');
+    _micSub = _mic.pcmStream.listen(
+      (frame) => _onMicFrame(frame.samples, frame.rawPeak),
+    );
+    debugPrint(
+      'ScoringSession: started mode=${_mode.name} '
+      'ref=${_hasReference ? "yes" : "no"}',
+    );
     return true;
   }
 
@@ -265,14 +274,20 @@ class ScoringSession {
         : rawPeak > _singingThreshold;
 
     if (shouldLog) {
-      debugPrint('SC #$_processedFrames pk=${rawPeak.toStringAsFixed(4)} '
-          'base=${_baselineRms.toStringAsFixed(4)} '
-          'voice=$isVoice');
+      debugPrint(
+        'SC #$_processedFrames pk=${rawPeak.toStringAsFixed(4)} '
+        'base=${_baselineRms.toStringAsFixed(4)} '
+        'voice=$isVoice',
+      );
     }
 
     // Noise gate
     if (rawPeak < _noiseGateThreshold) {
-      if (shouldLog) debugPrint('  -> GATED (pk < ${_noiseGateThreshold.toStringAsFixed(4)})');
+      if (shouldLog) {
+        debugPrint(
+          '  -> GATED (pk < ${_noiseGateThreshold.toStringAsFixed(4)})',
+        );
+      }
 
       _silentFrames++;
       if (_silentFrames > 12) {
@@ -291,8 +306,10 @@ class ScoringSession {
     if (!isVoice) {
       if (_mode == ScoringMode.streak) _streakCount = 0;
       if (shouldLog) {
-        debugPrint('  -> INSTRUMENT (pk=${rawPeak.toStringAsFixed(4)} '
-            'base=${_baselineRms.toStringAsFixed(4)})');
+        debugPrint(
+          '  -> INSTRUMENT (pk=${rawPeak.toStringAsFixed(4)} '
+          'base=${_baselineRms.toStringAsFixed(4)})',
+        );
       }
       _emit(0, 0, '--', 0, 0, 0, rms);
       return;
@@ -303,8 +320,10 @@ class ScoringSession {
     if (result.pitchHz < 60 || result.confidence < 0.3) {
       if (_mode == ScoringMode.streak) _streakCount = 0;
       if (shouldLog) {
-        debugPrint('  -> NOPITCH hz=${result.pitchHz.toStringAsFixed(0)} '
-            'conf=${result.confidence.toStringAsFixed(2)}');
+        debugPrint(
+          '  -> NOPITCH hz=${result.pitchHz.toStringAsFixed(0)} '
+          'conf=${result.confidence.toStringAsFixed(2)}',
+        );
       }
       _emit(0, 0, '--', 0, result.confidence, 0, rms);
       return;
@@ -330,8 +349,10 @@ class ScoringSession {
       // If the oracle says this is speaker bleed, skip it.
       if (singerConf < 0.3) {
         if (shouldLog) {
-          debugPrint('  -> BLEED singerConf=${singerConf.toStringAsFixed(2)} '
-              'ref=${refPitch.toStringAsFixed(0)}Hz');
+          debugPrint(
+            '  -> BLEED singerConf=${singerConf.toStringAsFixed(2)} '
+            'ref=${refPitch.toStringAsFixed(0)}Hz',
+          );
         }
         _emit(0, 0, '--', 0, confidence, 0, rms);
         return;
@@ -356,8 +377,10 @@ class ScoringSession {
     if (_mode == ScoringMode.streak) {
       if (frameScore >= 0.4) {
         _streakCount++;
-        frameScore = (frameScore + math.min(_streakCount, 30) / 75.0)
-            .clamp(0.0, 1.0);
+        frameScore = (frameScore + math.min(_streakCount, 30) / 75.0).clamp(
+          0.0,
+          1.0,
+        );
       } else {
         if (_streakCount > 5) frameScore = 0.05;
         _streakCount = 0;
@@ -376,15 +399,30 @@ class ScoringSession {
 
     // Note name
     final nn = singerMidi.round();
-    const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+    const names = [
+      'C',
+      'C#',
+      'D',
+      'D#',
+      'E',
+      'F',
+      'F#',
+      'G',
+      'G#',
+      'A',
+      'A#',
+      'B',
+    ];
     final noteName = '${names[nn % 12]}${nn ~/ 12 - 1}';
 
     if (shouldLog) {
-      debugPrint('  -> HIT! ${pitchHz.toStringAsFixed(0)}Hz '
-          'conf=${confidence.toStringAsFixed(2)} '
-          'prim=${primaryScore.toStringAsFixed(2)} '
-          'frame=${frameScore.toStringAsFixed(2)} '
-          'live=$currentScore');
+      debugPrint(
+        '  -> HIT! ${pitchHz.toStringAsFixed(0)}Hz '
+        'conf=${confidence.toStringAsFixed(2)} '
+        'prim=${primaryScore.toStringAsFixed(2)} '
+        'frame=${frameScore.toStringAsFixed(2)} '
+        'live=$currentScore',
+      );
     }
 
     _emit(pitchHz, primaryScore, noteName, 0, confidence, frameScore, rms);
@@ -462,8 +500,8 @@ class ScoringSession {
   double _scoreWithReference(double singerMidi, double pitchHz) {
     final refMidi = hzToMidi(_currentReferencePitchHz);
     return switch (_mode) {
-      ScoringMode.pitchClass || ScoringMode.streak =>
-        _refPitchClass(singerMidi, refMidi),
+      ScoringMode.pitchClass ||
+      ScoringMode.streak => _refPitchClass(singerMidi, refMidi),
       ScoringMode.contour => _refContourScore(singerMidi, refMidi),
       ScoringMode.interval => _refIntervalScore(singerMidi, refMidi),
     };
@@ -480,7 +518,9 @@ class ScoringSession {
   double _refContourScore(double singerMidi, double refMidi) {
     if (_prevSingerMidi > 0) {
       _singerContour.add(singerMidi - _prevSingerMidi);
-      if (_singerContour.length > _contourWindowSize) _singerContour.removeAt(0);
+      if (_singerContour.length > _contourWindowSize) {
+        _singerContour.removeAt(0);
+      }
     }
     if (_prevRefMidi > 0) {
       _refContour.add(refMidi - _prevRefMidi);
@@ -492,7 +532,9 @@ class ScoringSession {
     for (var i = 0; i < n; i++) {
       final a = _singerContour[_singerContour.length - n + i];
       final b = _refContour[_refContour.length - n + i];
-      dot += a * b; nA += a * a; nB += b * b;
+      dot += a * b;
+      nA += a * a;
+      nB += b * b;
     }
     if (nA < 0.001 && nB < 0.001) return 0.8;
     if (nA < 0.001 || nB < 0.001) return 0.3;
@@ -508,21 +550,30 @@ class ScoringSession {
 
   // =====================================================
 
-  void _emit(double pitchHz, double primary, String noteName,
-      double stability, double confidence, double frameScore, double rms) {
-    _scoreController.add(ScoringUpdate(
-      singerPitchHz: pitchHz,
-      referencePitchHz: _currentReferencePitchHz,
-      noteName: noteName,
-      primaryScore: primary,
-      stabilityScore: stability,
-      confidence: confidence,
-      frameScore: frameScore,
-      totalScore: currentScore,
-      overallScore: finalScore,
-      rmsEnergy: rms,
-      streakCount: _streakCount,
-    ));
+  void _emit(
+    double pitchHz,
+    double primary,
+    String noteName,
+    double stability,
+    double confidence,
+    double frameScore,
+    double rms,
+  ) {
+    _scoreController.add(
+      ScoringUpdate(
+        singerPitchHz: pitchHz,
+        referencePitchHz: _currentReferencePitchHz,
+        noteName: noteName,
+        primaryScore: primary,
+        stabilityScore: stability,
+        confidence: confidence,
+        frameScore: frameScore,
+        totalScore: currentScore,
+        overallScore: finalScore,
+        rmsEnergy: rms,
+        streakCount: _streakCount,
+      ),
+    );
   }
 
   void _pushScore(double score) {
