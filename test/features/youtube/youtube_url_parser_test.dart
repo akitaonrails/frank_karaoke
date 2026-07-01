@@ -13,7 +13,8 @@ void main() {
     test('extracts from watch URL with extra params', () {
       expect(
         extractVideoId(
-            'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s&list=PLx'),
+          'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s&list=PLx',
+        ),
         'dQw4w9WgXcQ',
       );
     });
@@ -26,10 +27,7 @@ void main() {
     });
 
     test('extracts from short youtu.be URL', () {
-      expect(
-        extractVideoId('https://youtu.be/dQw4w9WgXcQ'),
-        'dQw4w9WgXcQ',
-      );
+      expect(extractVideoId('https://youtu.be/dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
     });
 
     test('extracts from youtu.be with params', () {
@@ -62,7 +60,9 @@ void main() {
 
     test('extracts from live URL with params', () {
       expect(
-        extractVideoId('https://www.youtube.com/live/dQw4w9WgXcQ?feature=share'),
+        extractVideoId(
+          'https://www.youtube.com/live/dQw4w9WgXcQ?feature=share',
+        ),
         'dQw4w9WgXcQ',
       );
     });
@@ -73,10 +73,13 @@ void main() {
 
     test('returns null for youtube search', () {
       expect(
-        extractVideoId(
-            'https://www.youtube.com/results?search_query=karaoke'),
+        extractVideoId('https://www.youtube.com/results?search_query=karaoke'),
         isNull,
       );
+    });
+
+    test('returns null for non-youtube live URL', () {
+      expect(extractVideoId('https://example.com/live/dQw4w9WgXcQ'), isNull);
     });
 
     test('returns null for empty string', () {
