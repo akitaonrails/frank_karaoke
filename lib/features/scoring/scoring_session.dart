@@ -14,11 +14,12 @@ import 'scoring_engine.dart';
 
 /// Karaoke scoring.
 ///
-/// WITH reference (Android): 4 modes compare singer vs music.
-/// WITHOUT reference (Linux): single combined voice quality score
-/// that rewards clean pitch, melodic movement, and good technique.
-/// The mode selector still works but all modes use the same combined
-/// algorithm — mode selection is saved for when reference is available.
+/// WITH reference (pitch oracle loaded): 4 modes compare the singer against
+/// the reference pitch timeline.
+/// WITHOUT reference (oracle still loading or unavailable): a single combined
+/// voice-quality score that rewards clean pitch, melodic movement, and good
+/// technique. The mode selector still works but all modes use the same
+/// combined algorithm until a reference is available.
 class ScoringSession {
   final MicCaptureService _mic;
   final PitchDetector _pitchDetector;
@@ -166,7 +167,10 @@ class ScoringSession {
     debugPrint('Scoring: score reset, 5s warmup started');
   }
 
-  /// Feed a reference audio frame (Android: from just_audio PCM tap).
+  /// Feed a reference audio frame for spectral subtraction.
+  ///
+  /// Currently unused: there is no live reference PCM tap (the just_audio
+  /// path was removed); reference pitch comes from the pitch oracle instead.
   void feedReferenceFrame(Float64List samples) {
     _currentReferenceFrame = samples;
     _voiceIsolator.feedReference(samples);
@@ -429,7 +433,7 @@ class ScoringSession {
   }
 
   // =====================================================
-  // VOICE-ONLY SCORING (Linux, no reference)
+  // VOICE-ONLY SCORING (no reference / oracle unavailable)
   // =====================================================
   // Combined score from 3 signals:
   // 1. Confidence (40%): how "sung" vs "spoken" is this sound?

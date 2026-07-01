@@ -9,11 +9,15 @@ import '../../core/constants.dart';
 /// On Android with built-in mic, the mic picks up:
 ///   voice + instrumental (from speaker) + room reverb + speaker effects
 ///
-/// We have the clean instrumental audio from just_audio. Using spectral
-/// subtraction, we can remove (most of) the instrumental component,
-/// leaving a cleaner voice signal for pitch detection.
+/// When a clean instrumental reference frame is supplied, spectral
+/// subtraction can remove (most of) the instrumental component, leaving a
+/// cleaner voice signal for pitch detection.
 ///
-/// On desktop with an external mic, this is mostly a no-op (clean signal).
+/// NOTE: a live reference PCM tap is not currently wired up — the just_audio
+/// reference path was removed (YouTube's CDN blocks non-browser playback), so
+/// today Room/Party presets only run the high-pass stage and reference pitch
+/// comes from the pitch oracle. The subtraction code is kept for when
+/// reference audio returns.
 class VoiceIsolator {
   final AudioPreset _preset;
   final int _sampleRate;
@@ -30,14 +34,12 @@ class VoiceIsolator {
   int _estimatedLagSamples = 0;
   int _lagCalibrationCount = 0;
 
-  VoiceIsolator({
-    required AudioPreset preset,
-    int sampleRate = kSampleRate,
-  })  : _preset = preset,
-        _sampleRate = sampleRate,
-        // High-pass filter coefficient for ~200 Hz cutoff.
-        // alpha = RC / (RC + dt), where RC = 1/(2*pi*fc), dt = 1/sr
-        _hpAlpha = _computeHpAlpha(200, sampleRate);
+  VoiceIsolator({required AudioPreset preset, int sampleRate = kSampleRate})
+    : _preset = preset,
+      _sampleRate = sampleRate,
+      // High-pass filter coefficient for ~200 Hz cutoff.
+      // alpha = RC / (RC + dt), where RC = 1/(2*pi*fc), dt = 1/sr
+      _hpAlpha = _computeHpAlpha(200, sampleRate);
 
   static double _computeHpAlpha(double cutoffHz, int sampleRate) {
     final rc = 1.0 / (2.0 * math.pi * cutoffHz);
@@ -48,8 +50,9 @@ class VoiceIsolator {
   /// Process a mic audio frame. Returns the cleaned voice signal.
   ///
   /// [micSamples] is the raw mic input (may contain voice + music).
-  /// [referenceSamples] is the clean instrumental audio from just_audio
-  /// (null on Linux where we don't have PCM access).
+  /// [referenceSamples] is a clean instrumental frame for spectral
+  /// subtraction, or null when no reference audio is available (the current
+  /// default — see the class doc).
   Float64List process(Float64List micSamples, {Float64List? referenceSamples}) {
     var result = micSamples;
 
